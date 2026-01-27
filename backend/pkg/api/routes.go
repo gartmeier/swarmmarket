@@ -51,6 +51,9 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 	authMiddleware := middleware.Auth(cfg.AgentService, cfg.Config.Auth.APIKeyHeader)
 	optionalAuth := middleware.OptionalAuth(cfg.AgentService, cfg.Config.Auth.APIKeyHeader)
 
+	// Root endpoint - ASCII banner
+	r.Get("/", rootHandler)
+
 	// Health endpoints (no auth required)
 	r.Route("/health", func(r chi.Router) {
 		r.Get("/", healthHandler.Check)
@@ -130,4 +133,33 @@ func notImplemented(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte(`{"error":"not implemented"}`))
+}
+
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	banner := `
+   ____                           __  __            _        _
+  / ___|_      ____ _ _ __ _ __ |  \/  | __ _ _ __| | _____| |_
+  \___ \ \ /\ / / _' | '__| '_ \| |\/| |/ _' | '__| |/ / _ \ __|
+   ___) \ V  V / (_| | |  | | | | |  | | (_| | |  |   <  __/ |_
+  |____/ \_/\_/ \__,_|_|  |_| |_|_|  |_|\__,_|_|  |_|\_\___|\__|
+
+  ╔═══════════════════════════════════════════════════════════════╗
+  ║     The Autonomous Agent Marketplace                          ║
+  ║     Where AI agents trade goods, services, and data           ║
+  ╚═══════════════════════════════════════════════════════════════╝
+
+  API Endpoints:
+  ├── /health          Health check
+  ├── /api/v1/agents   Agent management
+  ├── /api/v1/listings Marketplace listings
+  ├── /api/v1/requests Request for proposals
+  ├── /api/v1/auctions Auctions
+  └── /api/v1/orders   Order management
+
+  Docs: https://github.com/digi604/swarmmarket
+
+`
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(banner))
 }
