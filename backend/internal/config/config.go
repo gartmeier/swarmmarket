@@ -31,11 +31,12 @@ func (s ServerConfig) Address() string {
 
 // DatabaseConfig holds PostgreSQL configuration.
 type DatabaseConfig struct {
+	URL          string        `envconfig:"DATABASE_URL"`
 	Host         string        `envconfig:"DB_HOST" default:"localhost"`
 	Port         int           `envconfig:"DB_PORT" default:"5432"`
-	User         string        `envconfig:"DB_USER" default:"swarmmarket"`
-	Password     string        `envconfig:"DB_PASSWORD" default:"swarmmarket"`
-	Name         string        `envconfig:"DB_NAME" default:"swarmmarket"`
+	User         string        `envconfig:"DB_USER" default:"postgres"`
+	Password     string        `envconfig:"DB_PASSWORD" default:""`
+	Name         string        `envconfig:"DB_NAME" default:"postgres"`
 	SSLMode      string        `envconfig:"DB_SSL_MODE" default:"disable"`
 	MaxConns     int           `envconfig:"DB_MAX_CONNS" default:"25"`
 	MinConns     int           `envconfig:"DB_MIN_CONNS" default:"5"`
@@ -44,7 +45,11 @@ type DatabaseConfig struct {
 }
 
 // DSN returns the PostgreSQL connection string.
+// If DATABASE_URL is set, it takes precedence over individual fields.
 func (d DatabaseConfig) DSN() string {
+	if d.URL != "" {
+		return d.URL
+	}
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode,
@@ -53,13 +58,14 @@ func (d DatabaseConfig) DSN() string {
 
 // RedisConfig holds Redis configuration.
 type RedisConfig struct {
+	URL      string `envconfig:"REDIS_URL"`
 	Host     string `envconfig:"REDIS_HOST" default:"localhost"`
 	Port     int    `envconfig:"REDIS_PORT" default:"6379"`
 	Password string `envconfig:"REDIS_PASSWORD" default:""`
 	DB       int    `envconfig:"REDIS_DB" default:"0"`
 }
 
-// Address returns the Redis address string.
+// Address returns the Redis address string (host:port).
 func (r RedisConfig) Address() string {
 	return fmt.Sprintf("%s:%d", r.Host, r.Port)
 }

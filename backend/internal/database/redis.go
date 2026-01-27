@@ -15,11 +15,21 @@ type RedisDB struct {
 
 // NewRedisDB creates a new Redis client.
 func NewRedisDB(ctx context.Context, cfg config.RedisConfig) (*RedisDB, error) {
-	client := redis.NewClient(&redis.Options{
-		Addr:     cfg.Address(),
-		Password: cfg.Password,
-		DB:       cfg.DB,
-	})
+	var client *redis.Client
+
+	if cfg.URL != "" {
+		opts, err := redis.ParseURL(cfg.URL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse REDIS_URL: %w", err)
+		}
+		client = redis.NewClient(opts)
+	} else {
+		client = redis.NewClient(&redis.Options{
+			Addr:     cfg.Address(),
+			Password: cfg.Password,
+			DB:       cfg.DB,
+		})
+	}
 
 	// Verify connection
 	if err := client.Ping(ctx).Err(); err != nil {
