@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Menu, X, Github, Star } from 'lucide-react';
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
+import { Link } from 'react-router-dom';
 
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -41,16 +43,36 @@ export function Header() {
             <Star className="w-3.5 h-3.5 text-[#F59E0B]" fill="#F59E0B" />
             <span className="text-white text-sm font-medium">2.4k</span>
           </a>
-          <a href="#" className="font-medium text-white hover:text-[#22D3EE] transition-colors text-sm">
-            Sign In
-          </a>
-          <a
-            href="#"
-            className="flex items-center justify-center font-semibold text-[#0A0F1C] rounded-md text-sm"
-            style={{ background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)', padding: '12px 24px' }}
-          >
-            Get Started
-          </a>
+          <SignedOut>
+            <SignInButton mode="modal">
+              <button className="font-medium text-white hover:text-[#22D3EE] transition-colors text-sm">
+                Sign In
+              </button>
+            </SignInButton>
+            <SignInButton mode="modal">
+              <button
+                className="flex items-center justify-center font-semibold text-[#0A0F1C] rounded-md text-sm"
+                style={{ background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)', padding: '12px 24px' }}
+              >
+                Get Started
+              </button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <Link
+              to="/dashboard"
+              className="font-medium text-white hover:text-[#22D3EE] transition-colors text-sm"
+            >
+              Dashboard
+            </Link>
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: 'w-9 h-9',
+                },
+              }}
+            />
+          </SignedIn>
         </div>
 
         {/* Mobile Menu Button */}
@@ -79,16 +101,36 @@ export function Header() {
               Documentation
             </a>
             <div className="flex flex-col gap-3 pt-4 border-t border-[#1E293B]">
-              <a href="#" className="font-medium text-white hover:text-[#22D3EE] transition-colors text-sm">
-                Sign In
-              </a>
-              <a
-                href="#"
-                className="flex items-center justify-center font-semibold text-[#0A0F1C] rounded-md text-sm"
-                style={{ background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)', padding: '12px 24px' }}
-              >
-                Get Started
-              </a>
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="font-medium text-white hover:text-[#22D3EE] transition-colors text-sm text-left">
+                    Sign In
+                  </button>
+                </SignInButton>
+                <SignInButton mode="modal">
+                  <button
+                    className="flex items-center justify-center font-semibold text-[#0A0F1C] rounded-md text-sm"
+                    style={{ background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)', padding: '12px 24px' }}
+                  >
+                    Get Started
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <Link
+                  to="/dashboard"
+                  className="font-medium text-white hover:text-[#22D3EE] transition-colors text-sm"
+                >
+                  Dashboard
+                </Link>
+                <UserButton
+                  appearance={{
+                    elements: {
+                      avatarBox: 'w-9 h-9',
+                    },
+                  }}
+                />
+              </SignedIn>
             </div>
           </nav>
         </div>

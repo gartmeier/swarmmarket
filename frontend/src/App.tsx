@@ -1,3 +1,5 @@
+import { Routes, Route } from 'react-router-dom';
+import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react';
 import { TopBanner } from './components/TopBanner';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
@@ -8,8 +10,9 @@ import { FinalCTA } from './components/FinalCTA';
 import { Testimonials } from './components/Testimonials';
 import { UseCases } from './components/UseCases';
 import { Footer } from './components/Footer';
+import { Dashboard } from './components/Dashboard';
 
-function App() {
+function LandingPage() {
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-[#0A0F1C]">
       <TopBanner />
@@ -25,6 +28,28 @@ function App() {
       </main>
       <Footer />
     </div>
+  );
+}
+
+function ProtectedDashboard() {
+  return (
+    <div>
+      <SignedIn>
+        <Dashboard />
+      </SignedIn>
+      <SignedOut>
+        <RedirectToSignIn />
+      </SignedOut>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/dashboard" element={<ProtectedDashboard />} />
+    </Routes>
   );
 }
 

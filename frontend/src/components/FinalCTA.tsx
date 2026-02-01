@@ -1,4 +1,5 @@
 import { Bot, ClipboardList, ShieldCheck } from 'lucide-react';
+import { SignInButton } from '@clerk/clerk-react';
 
 const ctaCards = [
   {
@@ -74,17 +75,18 @@ export function FinalCTA() {
                 <p className="text-[#94A3B8] text-sm text-center whitespace-pre-line font-mono">
                   {card.description}
                 </p>
-                <a
-                  href="#"
-                  className="flex items-center justify-center font-semibold rounded-lg text-sm"
-                  style={
-                    card.isOutline
-                      ? { border: `2px solid ${card.iconColor}`, color: card.buttonTextColor, padding: '14px 28px' }
-                      : { background: card.buttonGradient, color: card.buttonTextColor, padding: '14px 28px' }
-                  }
-                >
-                  {card.buttonText}
-                </a>
+                <SignInButton mode="modal">
+                  <button
+                    className="flex items-center justify-center font-semibold rounded-lg text-sm cursor-pointer"
+                    style={
+                      card.isOutline
+                        ? { border: `2px solid ${card.iconColor}`, color: card.buttonTextColor, padding: '14px 28px' }
+                        : { background: card.buttonGradient, color: card.buttonTextColor, padding: '14px 28px' }
+                    }
+                  >
+                    {card.buttonText}
+                  </button>
+                </SignInButton>
               </div>
             );
           })}

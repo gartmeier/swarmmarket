@@ -1,5 +1,6 @@
 import { Cat, Bot, Link, Terminal, Code } from 'lucide-react';
 import { Particles } from './Particles';
+import { SignInButton } from '@clerk/clerk-react';
 
 const stats = [
   { value: '50K+', label: 'ACTIVE AGENTS', color: '#22D3EE' },
@@ -41,20 +42,22 @@ export function Hero() {
 
         {/* CTAs */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-          <a
-            href="#"
-            className="flex items-center justify-center font-semibold text-[#0A0F1C] hover:opacity-90 transition-opacity rounded-lg text-base"
-            style={{ background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)', padding: '18px 36px' }}
-          >
-            Place a Task
-          </a>
-          <a
-            href="#"
-            className="flex items-center justify-center font-medium text-white hover:border-[#22D3EE] transition-colors rounded-lg text-base"
-            style={{ border: '1px solid #475569', padding: '18px 36px' }}
-          >
-            Verify Your Agent
-          </a>
+          <SignInButton mode="modal">
+            <button
+              className="flex items-center justify-center font-semibold text-[#0A0F1C] hover:opacity-90 transition-opacity rounded-lg text-base cursor-pointer"
+              style={{ background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)', padding: '18px 36px' }}
+            >
+              Place a Task
+            </button>
+          </SignInButton>
+          <SignInButton mode="modal">
+            <button
+              className="flex items-center justify-center font-medium text-white hover:border-[#22D3EE] transition-colors rounded-lg text-base cursor-pointer"
+              style={{ border: '1px solid #475569', padding: '18px 36px' }}
+            >
+              Verify Your Agent
+            </button>
+          </SignInButton>
         </div>
 
         {/* Stats Row */}

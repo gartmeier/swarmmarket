@@ -39,6 +39,9 @@ export function Particles() {
   const mouseRef = useRef<{ x: number; y: number }>({ x: -1000, y: -1000 });
   const gravityPointsRef = useRef<GravityPoint[]>([]);
   const timeRef = useRef<number>(0);
+  const scrollVelocityRef = useRef<number>(0);
+  const lastScrollYRef = useRef<number>(0);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -163,65 +166,100 @@ export function Particles() {
     };
 
     const updateParticle = (p: Particle) => {
-      // Update trail
-      p.trail.unshift({ x: p.x, y: p.y, alpha: p.alpha });
-      if (p.trail.length > 8) p.trail.pop();
-      p.trail.forEach((t) => (t.alpha *= 0.85));
+      // Get scroll intensity - scales directly with scroll speed (no upper cap)
+      const scrollSpeed = Math.abs(scrollVelocityRef.current);
+      const scrollIntensity = scrollSpeed / 20; // More responsive to scroll speed
 
-      // Wave motion
-      const waveX = Math.sin(timeRef.current * 0.02 + p.waveOffset) * p.waveAmplitude;
-      const waveY = Math.cos(timeRef.current * 0.015 + p.waveOffset) * p.waveAmplitude;
+      // Only update trail and position when scrolling
+      if (scrollSpeed > 0.5) {
+        // Update trail
+        p.trail.unshift({ x: p.x, y: p.y, alpha: p.alpha });
+        if (p.trail.length > 8) p.trail.pop();
+        p.trail.forEach((t) => (t.alpha *= 0.85));
 
-      // Mouse repulsion
-      const mdx = p.x - mouseRef.current.x;
-      const mdy = p.y - mouseRef.current.y;
-      const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy);
-      const mouseRadius = 150;
-      let mouseForceX = 0;
-      let mouseForceY = 0;
-      if (mouseDist < mouseRadius && mouseDist > 0) {
-        const force = (1 - mouseDist / mouseRadius) * 3;
-        mouseForceX = (mdx / mouseDist) * force;
-        mouseForceY = (mdy / mouseDist) * force;
-      }
+        // Wave motion - scaled by scroll speed
+        const waveScale = Math.min(scrollIntensity, 2); // Cap wave effect
+        const waveX = Math.sin(timeRef.current * 0.02 + p.waveOffset) * p.waveAmplitude * waveScale;
+        const waveY = Math.cos(timeRef.current * 0.015 + p.waveOffset) * p.waveAmplitude * waveScale;
 
-      // Gravity points attraction
-      let gravityForceX = 0;
-      let gravityForceY = 0;
-      for (const gp of gravityPointsRef.current) {
-        const gdx = gp.x - p.x;
-        const gdy = gp.y - p.y;
-        const gDist = Math.sqrt(gdx * gdx + gdy * gdy);
-        if (gDist < gp.radius && gDist > 0) {
-          const force = (1 - gDist / gp.radius) * gp.strength;
-          gravityForceX += (gdx / gDist) * force;
-          gravityForceY += (gdy / gDist) * force;
+        // Mouse repulsion
+        const mdx = p.x - mouseRef.current.x;
+        const mdy = p.y - mouseRef.current.y;
+        const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy);
+        const mouseRadius = 150;
+        let mouseForceX = 0;
+        let mouseForceY = 0;
+        if (mouseDist < mouseRadius && mouseDist > 0) {
+          const force = (1 - mouseDist / mouseRadius) * 3;
+          mouseForceX = (mdx / mouseDist) * force;
+          mouseForceY = (mdy / mouseDist) * force;
+        }
+
+        // Gravity points attraction
+        let gravityForceX = 0;
+        let gravityForceY = 0;
+        for (const gp of gravityPointsRef.current) {
+          const gdx = gp.x - p.x;
+          const gdy = gp.y - p.y;
+          const gDist = Math.sqrt(gdx * gdx + gdy * gdy);
+          if (gDist < gp.radius && gDist > 0) {
+            const force = (1 - gDist / gp.radius) * gp.strength;
+            gravityForceX += (gdx / gDist) * force;
+            gravityForceY += (gdy / gDist) * force;
+          }
+        }
+
+        // Apply forces - movement speed proportional to scroll speed
+        const speedMultiplier = Math.min(scrollIntensity, 5); // Cap at 5x for very fast scrolls
+        p.vx = (p.baseVx + waveX + mouseForceX + gravityForceX) * speedMultiplier;
+        p.vy = (p.baseVy + waveY + mouseForceY + gravityForceY) * speedMultiplier;
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Wrap around edges
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+      } else {
+        // Fade out trails when not scrolling
+        p.trail.forEach((t) => (t.alpha *= 0.9));
+        if (p.trail.length > 0 && p.trail[p.trail.length - 1].alpha < 0.01) {
+          p.trail.pop();
         }
       }
-
-      // Apply forces
-      p.vx = p.baseVx + waveX + mouseForceX + gravityForceX;
-      p.vy = p.baseVy + waveY + mouseForceY + gravityForceY;
-
-      p.x += p.vx;
-      p.y += p.vy;
-
-      // Wrap around edges
-      if (p.x < 0) p.x = canvas.width;
-      if (p.x > canvas.width) p.x = 0;
-      if (p.y < 0) p.y = canvas.height;
-      if (p.y > canvas.height) p.y = 0;
     };
 
     const animate = () => {
       timeRef.current++;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // Decay scroll velocity
+      scrollVelocityRef.current *= 0.95;
+
       particlesRef.current.forEach(updateParticle);
       drawConnections();
       particlesRef.current.forEach(drawParticle);
 
       animationRef.current = requestAnimationFrame(animate);
+    };
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const delta = currentScrollY - lastScrollYRef.current;
+      scrollVelocityRef.current = delta;
+      lastScrollYRef.current = currentScrollY;
+
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      // Set timeout to stop movement after scrolling stops
+      scrollTimeoutRef.current = setTimeout(() => {
+        scrollVelocityRef.current = 0;
+      }, 150);
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -238,6 +276,7 @@ export function Particles() {
     resizeCanvas();
     initParticles();
     initGravityPoints();
+    lastScrollYRef.current = window.scrollY;
     animate();
 
     const handleResize = () => {
@@ -247,15 +286,20 @@ export function Particles() {
     };
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, { passive: true });
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseleave', handleMouseLeave);
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+      }
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
       }
     };
   }, []);
