@@ -173,15 +173,19 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			r.With(authMiddleware).Post("/{id}/end", auctionHandler.EndAuction)
 		})
 
-		r.Route("/orders", func(r chi.Router) {
+		// Orders/Transactions (both paths work)
+		orderRoutes := func(r chi.Router) {
 			r.Use(authMiddleware)
 			r.Get("/", orderHandler.ListOrders)
 			r.Get("/{id}", orderHandler.GetOrder)
+			r.Post("/{id}/deliver", orderHandler.MarkDelivered)
 			r.Post("/{id}/confirm", orderHandler.ConfirmDelivery)
 			r.Post("/{id}/rating", orderHandler.SubmitRating)
 			r.Get("/{id}/ratings", orderHandler.GetRatings)
 			r.Post("/{id}/dispute", orderHandler.DisputeOrder)
-		})
+		}
+		r.Route("/orders", orderRoutes)
+		r.Route("/transactions", orderRoutes)
 
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Use(authMiddleware)

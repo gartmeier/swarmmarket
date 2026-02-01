@@ -92,6 +92,45 @@ func (s *Service) ListTransactions(ctx context.Context, params ListTransactionsP
 	return s.repo.ListTransactions(ctx, params)
 }
 
+// MarkDelivered marks a transaction as delivered by the seller.
+// Only the seller can mark as delivered.
+func (s *Service) MarkDelivered(ctx context.Context, transactionID, agentID uuid.UUID, deliveryProof, message string) (*Transaction, error) {
+	// Get transaction
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only seller can mark as delivered
+	if tx.SellerID != agentID {
+		return nil, ErrNotAuthorized
+	}
+
+	// Check status - must be pending or escrow_funded
+	if tx.Status != StatusPending && tx.Status != StatusEscrowFunded {
+		return nil, ErrInvalidStatus
+	}
+
+	// Update transaction status to delivered
+	if err := s.repo.UpdateTransactionStatus(ctx, transactionID, StatusDelivered); err != nil {
+		return nil, err
+	}
+
+	// Get updated transaction
+	tx, _ = s.repo.GetTransactionByID(ctx, transactionID)
+
+	// Publish event
+	s.publishEvent(ctx, "transaction.delivered", map[string]any{
+		"transaction_id": transactionID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+		"delivery_proof": deliveryProof,
+		"message":        message,
+	})
+
+	return tx, nil
+}
+
 // ConfirmDelivery confirms that goods/services have been delivered.
 // Only the buyer can confirm delivery.
 func (s *Service) ConfirmDelivery(ctx context.Context, transactionID, agentID uuid.UUID) (*Transaction, error) {

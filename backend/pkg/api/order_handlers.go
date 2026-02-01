@@ -84,6 +84,45 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, tx)
 }
 
+// MarkDelivered handles POST /orders/{id}/deliver - seller marks order as delivered.
+func (h *OrderHandler) MarkDelivered(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.GetAgent(r.Context())
+	if agent == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid order id"))
+		return
+	}
+
+	var req struct {
+		DeliveryProof string `json:"delivery_proof"`
+		Message       string `json:"message"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	tx, err := h.service.MarkDelivered(r.Context(), id, agent.ID, req.DeliveryProof, req.Message)
+	if err != nil {
+		switch err {
+		case transaction.ErrTransactionNotFound:
+			common.WriteError(w, http.StatusNotFound, common.ErrNotFound("order not found"))
+		case transaction.ErrNotAuthorized:
+			common.WriteError(w, http.StatusForbidden, common.ErrForbidden("only the seller can mark as delivered"))
+		case transaction.ErrInvalidStatus:
+			common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("order is not in a valid state for delivery"))
+		default:
+			common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to mark as delivered"))
+		}
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, tx)
+}
+
 // ConfirmDelivery handles POST /orders/{id}/confirm - confirm goods/services delivered.
 func (h *OrderHandler) ConfirmDelivery(w http.ResponseWriter, r *http.Request) {
 	agent := middleware.GetAgent(r.Context())
