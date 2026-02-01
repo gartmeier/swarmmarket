@@ -106,3 +106,191 @@ func TestSendToAgentWhenNotConnected(t *testing.T) {
 		t.Errorf("SendToAgent() error = %v, want nil", err)
 	}
 }
+
+func TestMessageTypes(t *testing.T) {
+	tests := []struct {
+		msgType string
+		payload map[string]any
+	}{
+		{"offer.received", map[string]any{"offer_id": "123"}},
+		{"bid.placed", map[string]any{"bid_id": "456", "amount": 100.0}},
+		{"transaction.completed", map[string]any{"transaction_id": "789"}},
+		{"request.created", map[string]any{"request_id": "abc"}},
+		{"ping", nil},
+		{"pong", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.msgType, func(t *testing.T) {
+			msg := Message{
+				Type:    tt.msgType,
+				Payload: tt.payload,
+			}
+			if msg.Type != tt.msgType {
+				t.Errorf("expected type %s, got %s", tt.msgType, msg.Type)
+			}
+		})
+	}
+}
+
+func TestAgentMessage(t *testing.T) {
+	agentID := uuid.New()
+	msgData := []byte(`{"type":"test","payload":{}}`)
+
+	agentMsg := &AgentMessage{
+		AgentID: agentID,
+		Message: msgData,
+	}
+
+	if agentMsg.AgentID != agentID {
+		t.Error("AgentID not set correctly")
+	}
+	if string(agentMsg.Message) != string(msgData) {
+		t.Error("Message not set correctly")
+	}
+}
+
+func TestHubConcurrentAccess(t *testing.T) {
+	hub := NewHub()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	go hub.Run(ctx)
+
+	// Concurrent reads
+	done := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				hub.ConnectedCount()
+				hub.IsConnected(uuid.New())
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+}
+
+func TestHubMultipleAgentChecks(t *testing.T) {
+	hub := NewHub()
+
+	agents := make([]uuid.UUID, 10)
+	for i := range agents {
+		agents[i] = uuid.New()
+	}
+
+	// None should be connected
+	for _, agentID := range agents {
+		if hub.IsConnected(agentID) {
+			t.Errorf("agent %s should not be connected", agentID)
+		}
+	}
+
+	// Count should be 0
+	if hub.ConnectedCount() != 0 {
+		t.Errorf("expected 0 connections, got %d", hub.ConnectedCount())
+	}
+}
+
+func TestMessagePayloadTypes(t *testing.T) {
+	msg := Message{
+		Type: "complex.payload",
+		Payload: map[string]any{
+			"string":  "value",
+			"int":     42,
+			"float":   3.14,
+			"bool":    true,
+			"nil":     nil,
+			"array":   []any{1, 2, 3},
+			"nested":  map[string]any{"key": "value"},
+		},
+	}
+
+	if msg.Payload["string"] != "value" {
+		t.Error("string payload incorrect")
+	}
+	if msg.Payload["int"] != 42 {
+		t.Error("int payload incorrect")
+	}
+	if msg.Payload["float"] != 3.14 {
+		t.Error("float payload incorrect")
+	}
+	if msg.Payload["bool"] != true {
+		t.Error("bool payload incorrect")
+	}
+	if msg.Payload["nil"] != nil {
+		t.Error("nil payload incorrect")
+	}
+}
+
+func TestClientStruct(t *testing.T) {
+	hub := NewHub()
+	agentID := uuid.New()
+
+	client := &Client{
+		hub:     hub,
+		conn:    nil, // Would be a real connection in production
+		send:    make(chan []byte, 256),
+		agentID: agentID,
+	}
+
+	if client.hub != hub {
+		t.Error("hub not set correctly")
+	}
+	if client.agentID != agentID {
+		t.Error("agentID not set correctly")
+	}
+	if client.send == nil {
+		t.Error("send channel should not be nil")
+	}
+}
+
+func TestSendToAgentMultipleMessages(t *testing.T) {
+	hub := NewHub()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	go hub.Run(ctx)
+
+	agentID := uuid.New()
+
+	// Send multiple messages (should not block even if agent not connected)
+	for i := 0; i < 10; i++ {
+		err := hub.SendToAgent(agentID, Message{
+			Type: "test",
+			Payload: map[string]any{
+				"index": i,
+			},
+		})
+		if err != nil {
+			t.Errorf("SendToAgent() error on message %d: %v", i, err)
+		}
+	}
+}
+
+func TestConstants(t *testing.T) {
+	// Verify constants are set
+	if writeWait <= 0 {
+		t.Error("writeWait should be positive")
+	}
+	if pongWait <= 0 {
+		t.Error("pongWait should be positive")
+	}
+	if pingPeriod <= 0 {
+		t.Error("pingPeriod should be positive")
+	}
+	if maxMessageSize <= 0 {
+		t.Error("maxMessageSize should be positive")
+	}
+
+	// pingPeriod should be less than pongWait (as per comment in code)
+	if pingPeriod >= pongWait {
+		t.Error("pingPeriod should be less than pongWait")
+	}
+}

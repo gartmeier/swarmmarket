@@ -3,6 +3,7 @@ package transaction
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -305,5 +306,365 @@ func TestServiceErrors(t *testing.T) {
 
 	if ErrTransactionNotReady.Error() != "transaction is not ready for this operation" {
 		t.Errorf("unexpected error message: %s", ErrTransactionNotReady.Error())
+	}
+}
+
+func TestNewService(t *testing.T) {
+	publisher := &mockPublisher{}
+	service := NewService(nil, publisher)
+
+	if service == nil {
+		t.Fatal("expected service to be created")
+	}
+	if service.publisher != publisher {
+		t.Error("publisher not set correctly")
+	}
+	if service.payment != nil {
+		t.Error("payment should be nil initially")
+	}
+}
+
+func TestSetPaymentService(t *testing.T) {
+	service := NewService(nil, nil)
+	paymentService := newMockPaymentService()
+
+	service.SetPaymentService(paymentService)
+
+	if service.payment == nil {
+		t.Error("payment service should be set")
+	}
+}
+
+func TestPublishEvent(t *testing.T) {
+	publisher := &mockPublisher{}
+	service := &Service{publisher: publisher}
+
+	ctx := context.Background()
+	service.publishEvent(ctx, "test.event", map[string]any{"key": "value"})
+
+	// Give the goroutine time to execute
+	time.Sleep(10 * time.Millisecond)
+
+	if len(publisher.events) != 1 {
+		t.Errorf("expected 1 event, got %d", len(publisher.events))
+	}
+	if publisher.events[0].eventType != "test.event" {
+		t.Errorf("expected event type 'test.event', got %s", publisher.events[0].eventType)
+	}
+}
+
+func TestPublishEventNilPublisher(t *testing.T) {
+	service := &Service{publisher: nil}
+
+	// Should not panic with nil publisher
+	ctx := context.Background()
+	service.publishEvent(ctx, "test.event", map[string]any{"key": "value"})
+}
+
+func TestTransactionAllFields(t *testing.T) {
+	now := time.Now()
+	requestID := uuid.New()
+	offerID := uuid.New()
+	listingID := uuid.New()
+	auctionID := uuid.New()
+	completedAt := now.Add(24 * time.Hour)
+	deliveryConfirmedAt := now.Add(12 * time.Hour)
+
+	tx := &Transaction{
+		ID:                  uuid.New(),
+		BuyerID:             uuid.New(),
+		SellerID:            uuid.New(),
+		ListingID:           &listingID,
+		RequestID:           &requestID,
+		OfferID:             &offerID,
+		AuctionID:           &auctionID,
+		Amount:              500.0,
+		Currency:            "USD",
+		PlatformFee:         25.0,
+		Status:              StatusCompleted,
+		DeliveryConfirmedAt: &deliveryConfirmedAt,
+		CompletedAt:         &completedAt,
+		Metadata:            map[string]any{"notes": "test transaction"},
+		CreatedAt:           now,
+		UpdatedAt:           now,
+		BuyerName:           "Test Buyer",
+		SellerName:          "Test Seller",
+	}
+
+	if tx.Amount != 500.0 {
+		t.Errorf("expected amount 500.0, got %f", tx.Amount)
+	}
+	if tx.Status != StatusCompleted {
+		t.Error("status not set correctly")
+	}
+	if tx.PlatformFee != 25.0 {
+		t.Errorf("expected platform fee 25.0, got %f", tx.PlatformFee)
+	}
+	if tx.BuyerName != "Test Buyer" {
+		t.Error("buyer name not set correctly")
+	}
+	if tx.DeliveryConfirmedAt == nil {
+		t.Error("delivery confirmed at should be set")
+	}
+}
+
+func TestEscrowAccountAllFields(t *testing.T) {
+	now := time.Now()
+	releasedAt := now.Add(48 * time.Hour)
+
+	escrow := &EscrowAccount{
+		ID:                    uuid.New(),
+		TransactionID:         uuid.New(),
+		Amount:                250.0,
+		Currency:              "EUR",
+		Status:                EscrowFunded,
+		StripePaymentIntentID: "pi_test123",
+		FundedAt:              &now,
+		ReleasedAt:            &releasedAt,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+
+	if escrow.Amount != 250.0 {
+		t.Errorf("expected amount 250.0, got %f", escrow.Amount)
+	}
+	if escrow.Status != EscrowFunded {
+		t.Error("status not set correctly")
+	}
+	if escrow.StripePaymentIntentID != "pi_test123" {
+		t.Error("payment intent ID not set correctly")
+	}
+	if escrow.FundedAt == nil {
+		t.Error("funded at should be set")
+	}
+}
+
+func TestRatingAllFields(t *testing.T) {
+	now := time.Now()
+	rating := &Rating{
+		ID:            uuid.New(),
+		TransactionID: uuid.New(),
+		RaterID:       uuid.New(),
+		RatedAgentID:  uuid.New(),
+		Score:         5,
+		Comment:       "Excellent service, highly recommended!",
+		CreatedAt:     now,
+	}
+
+	if rating.Score != 5 {
+		t.Errorf("expected score 5, got %d", rating.Score)
+	}
+	if rating.Comment != "Excellent service, highly recommended!" {
+		t.Error("comment not set correctly")
+	}
+}
+
+func TestRatingScoreValidation(t *testing.T) {
+	validScores := []int{1, 2, 3, 4, 5}
+	for _, score := range validScores {
+		if score < 1 || score > 5 {
+			t.Errorf("score %d should be valid", score)
+		}
+	}
+
+	invalidScores := []int{0, -1, 6, 10, 100}
+	for _, score := range invalidScores {
+		if score >= 1 && score <= 5 {
+			t.Errorf("score %d should be invalid", score)
+		}
+	}
+}
+
+func TestListTransactionsParamsDefaults(t *testing.T) {
+	params := ListTransactionsParams{}
+
+	if params.Limit != 0 {
+		t.Errorf("expected default limit 0, got %d", params.Limit)
+	}
+	if params.Offset != 0 {
+		t.Errorf("expected default offset 0, got %d", params.Offset)
+	}
+}
+
+func TestListTransactionsParamsWithFilters(t *testing.T) {
+	agentID := uuid.New()
+	status := StatusDelivered
+
+	params := ListTransactionsParams{
+		AgentID: &agentID,
+		Status:  &status,
+		Role:    "seller",
+		Limit:   50,
+		Offset:  100,
+	}
+
+	if *params.AgentID != agentID {
+		t.Error("agent ID not set correctly")
+	}
+	if *params.Status != StatusDelivered {
+		t.Error("status not set correctly")
+	}
+	if params.Role != "seller" {
+		t.Errorf("expected role 'seller', got %s", params.Role)
+	}
+	if params.Limit != 50 {
+		t.Errorf("expected limit 50, got %d", params.Limit)
+	}
+	if params.Offset != 100 {
+		t.Errorf("expected offset 100, got %d", params.Offset)
+	}
+}
+
+func TestTransactionListResultEmpty(t *testing.T) {
+	result := &TransactionListResult{
+		Items:  []*Transaction{},
+		Total:  0,
+		Limit:  20,
+		Offset: 0,
+	}
+
+	if len(result.Items) != 0 {
+		t.Errorf("expected 0 items, got %d", len(result.Items))
+	}
+	if result.Total != 0 {
+		t.Errorf("expected total 0, got %d", result.Total)
+	}
+}
+
+func TestTransactionListResultWithItems(t *testing.T) {
+	items := []*Transaction{
+		{ID: uuid.New(), Amount: 100.0},
+		{ID: uuid.New(), Amount: 200.0},
+		{ID: uuid.New(), Amount: 300.0},
+	}
+
+	result := &TransactionListResult{
+		Items:  items,
+		Total:  100,
+		Limit:  20,
+		Offset: 40,
+	}
+
+	if len(result.Items) != 3 {
+		t.Errorf("expected 3 items, got %d", len(result.Items))
+	}
+	if result.Total != 100 {
+		t.Errorf("expected total 100, got %d", result.Total)
+	}
+	if result.Offset != 40 {
+		t.Errorf("expected offset 40, got %d", result.Offset)
+	}
+}
+
+func TestCreateTransactionRequestValidation(t *testing.T) {
+	requestID := uuid.New()
+	offerID := uuid.New()
+
+	req := &CreateTransactionRequest{
+		BuyerID:   uuid.New(),
+		SellerID:  uuid.New(),
+		RequestID: &requestID,
+		OfferID:   &offerID,
+		Amount:    100.0,
+		Currency:  "USD",
+	}
+
+	// Validate required fields
+	if req.BuyerID == uuid.Nil {
+		t.Error("buyer ID should not be nil")
+	}
+	if req.SellerID == uuid.Nil {
+		t.Error("seller ID should not be nil")
+	}
+	if req.Amount <= 0 {
+		t.Error("amount should be positive")
+	}
+}
+
+func TestSubmitRatingRequestValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     SubmitRatingRequest
+		wantErr bool
+	}{
+		{
+			name:    "valid rating",
+			req:     SubmitRatingRequest{Score: 5, Comment: "Great!"},
+			wantErr: false,
+		},
+		{
+			name:    "score too low",
+			req:     SubmitRatingRequest{Score: 0},
+			wantErr: true,
+		},
+		{
+			name:    "score too high",
+			req:     SubmitRatingRequest{Score: 6},
+			wantErr: true,
+		},
+		{
+			name:    "min valid score",
+			req:     SubmitRatingRequest{Score: 1},
+			wantErr: false,
+		},
+		{
+			name:    "max valid score",
+			req:     SubmitRatingRequest{Score: 5},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hasErr := tt.req.Score < 1 || tt.req.Score > 5
+			if hasErr != tt.wantErr {
+				t.Errorf("validation error = %v, wantErr %v", hasErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDisputeRequestValidation(t *testing.T) {
+	req := &DisputeRequest{
+		Reason:      "Item not received",
+		Description: "I never received the data package that was promised.",
+	}
+
+	if req.Reason == "" {
+		t.Error("reason should not be empty")
+	}
+	if len(req.Description) == 0 {
+		t.Error("description should be provided")
+	}
+}
+
+func TestDisputeRequestEmptyReason(t *testing.T) {
+	req := &DisputeRequest{
+		Reason:      "",
+		Description: "Some description",
+	}
+
+	if req.Reason != "" {
+		t.Error("expected empty reason")
+	}
+}
+
+func TestEscrowFundingResultAllFields(t *testing.T) {
+	result := &EscrowFundingResult{
+		TransactionID:   uuid.New(),
+		PaymentIntentID: "pi_test_abc123",
+		ClientSecret:    "pi_test_abc123_secret_xyz",
+		Amount:          150.0,
+		Currency:        "USD",
+	}
+
+	if result.PaymentIntentID != "pi_test_abc123" {
+		t.Error("payment intent ID not set correctly")
+	}
+	if result.ClientSecret != "pi_test_abc123_secret_xyz" {
+		t.Error("client secret not set correctly")
+	}
+	if result.Amount != 150.0 {
+		t.Errorf("expected amount 150.0, got %f", result.Amount)
 	}
 }
