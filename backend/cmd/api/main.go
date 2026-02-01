@@ -107,7 +107,9 @@ func main() {
 			WebhookSecret:      cfg.Stripe.WebhookSecret,
 			PlatformFeePercent: cfg.Stripe.PlatformFeePercent,
 		})
-		log.Println("Stripe payment service initialized")
+		// Wire payment adapter to transaction service for escrow
+		transactionService.SetPaymentService(payment.NewAdapter(paymentService))
+		log.Println("Stripe payment service initialized and wired to transactions")
 	} else {
 		log.Println("Stripe not configured - payment endpoints disabled")
 	}

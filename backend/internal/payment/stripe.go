@@ -207,6 +207,45 @@ type TransferResult struct {
 	Status     string  `json:"status"`
 }
 
+// Adapter implements transaction.PaymentService interface.
+type Adapter struct {
+	service *Service
+}
+
+// NewAdapter creates a payment adapter for the transaction service.
+func NewAdapter(service *Service) *Adapter {
+	return &Adapter{service: service}
+}
+
+// CreateEscrowPayment creates a payment intent for escrow.
+func (a *Adapter) CreateEscrowPayment(ctx context.Context, transactionID, buyerID, sellerID string, amount float64, currency string) (string, string, error) {
+	txID, _ := uuid.Parse(transactionID)
+	bID, _ := uuid.Parse(buyerID)
+	sID, _ := uuid.Parse(sellerID)
+
+	result, err := a.service.CreateEscrowPayment(ctx, &CreatePaymentRequest{
+		TransactionID: txID,
+		BuyerID:       bID,
+		SellerID:      sID,
+		Amount:        amount,
+		Currency:      currency,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return result.PaymentIntentID, result.ClientSecret, nil
+}
+
+// CapturePayment captures a held payment.
+func (a *Adapter) CapturePayment(ctx context.Context, paymentIntentID string) error {
+	return a.service.CapturePayment(ctx, paymentIntentID)
+}
+
+// RefundPayment refunds a payment.
+func (a *Adapter) RefundPayment(ctx context.Context, paymentIntentID string) error {
+	return a.service.RefundPayment(ctx, paymentIntentID, nil)
+}
+
 func normalizeCurrency(currency string) string {
 	if currency == "" {
 		return "usd"

@@ -20,10 +20,18 @@ type EventPublisher interface {
 	Publish(ctx context.Context, eventType string, payload map[string]any) error
 }
 
+// PaymentService handles payment operations.
+type PaymentService interface {
+	CreateEscrowPayment(ctx context.Context, transactionID, buyerID, sellerID string, amount float64, currency string) (paymentIntentID, clientSecret string, err error)
+	CapturePayment(ctx context.Context, paymentIntentID string) error
+	RefundPayment(ctx context.Context, paymentIntentID string) error
+}
+
 // Service handles transaction business logic.
 type Service struct {
 	repo      *Repository
 	publisher EventPublisher
+	payment   PaymentService
 }
 
 // NewService creates a new transaction service.
@@ -32,6 +40,11 @@ func NewService(repo *Repository, publisher EventPublisher) *Service {
 		repo:      repo,
 		publisher: publisher,
 	}
+}
+
+// SetPaymentService sets the payment service (optional, for escrow).
+func (s *Service) SetPaymentService(payment PaymentService) {
+	s.payment = payment
 }
 
 // CreateFromOffer creates a transaction from an accepted offer (implements marketplace.TransactionCreator).
@@ -90,6 +103,80 @@ func (s *Service) ListTransactions(ctx context.Context, params ListTransactionsP
 		params.Limit = 100
 	}
 	return s.repo.ListTransactions(ctx, params)
+}
+
+// FundEscrow creates a payment intent for the buyer to fund escrow.
+// Returns the client secret for the buyer to complete payment.
+func (s *Service) FundEscrow(ctx context.Context, transactionID, buyerID uuid.UUID) (*EscrowFundingResult, error) {
+	// Get transaction
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only buyer can fund
+	if tx.BuyerID != buyerID {
+		return nil, ErrNotAuthorized
+	}
+
+	// Must be pending
+	if tx.Status != StatusPending {
+		return nil, ErrInvalidStatus
+	}
+
+	// Check if payment service is configured
+	if s.payment == nil {
+		return nil, errors.New("payment service not configured")
+	}
+
+	// Create payment intent
+	paymentIntentID, clientSecret, err := s.payment.CreateEscrowPayment(
+		ctx,
+		transactionID.String(),
+		tx.BuyerID.String(),
+		tx.SellerID.String(),
+		tx.Amount,
+		tx.Currency,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update escrow with payment intent ID
+	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
+	if err == nil {
+		s.repo.UpdateEscrowPaymentIntent(ctx, escrow.ID, paymentIntentID)
+	}
+
+	return &EscrowFundingResult{
+		TransactionID:   transactionID,
+		PaymentIntentID: paymentIntentID,
+		ClientSecret:    clientSecret,
+		Amount:          tx.Amount,
+		Currency:        tx.Currency,
+	}, nil
+}
+
+// ConfirmEscrowFunded is called when payment succeeds (via webhook or confirmation).
+func (s *Service) ConfirmEscrowFunded(ctx context.Context, transactionID uuid.UUID, paymentIntentID string) error {
+	// Update transaction status
+	if err := s.repo.UpdateTransactionStatus(ctx, transactionID, StatusEscrowFunded); err != nil {
+		return err
+	}
+
+	// Update escrow
+	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
+	if err == nil {
+		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowFunded)
+	}
+
+	// Publish event
+	s.publishEvent(ctx, "transaction.escrow_funded", map[string]any{
+		"transaction_id":    transactionID,
+		"payment_intent_id": paymentIntentID,
+	})
+
+	return nil
 }
 
 // MarkDelivered marks a transaction as delivered by the seller.
@@ -181,15 +268,24 @@ func (s *Service) CompleteTransaction(ctx context.Context, transactionID uuid.UU
 		return nil, ErrInvalidStatus
 	}
 
+	// Get escrow and capture payment if we have a payment intent
+	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
+	if err == nil && escrow.StripePaymentIntentID != "" && s.payment != nil {
+		// Capture the held payment (releases funds to seller)
+		if err := s.payment.CapturePayment(ctx, escrow.StripePaymentIntentID); err != nil {
+			// Log error but don't fail - manual resolution needed
+			s.publishEvent(ctx, "payment.capture_failed", map[string]any{
+				"transaction_id":    transactionID,
+				"payment_intent_id": escrow.StripePaymentIntentID,
+				"error":             err.Error(),
+			})
+		}
+		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowReleased)
+	}
+
 	// Complete transaction
 	if err := s.repo.CompleteTransaction(ctx, transactionID); err != nil {
 		return nil, err
-	}
-
-	// Release escrow
-	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
-	if err == nil {
-		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowReleased)
 	}
 
 	// Update agent stats
@@ -327,6 +423,26 @@ func (s *Service) DisputeTransaction(ctx context.Context, transactionID, agentID
 	})
 
 	return tx, nil
+}
+
+// RefundTransaction marks a transaction as refunded (called after Stripe refund).
+func (s *Service) RefundTransaction(ctx context.Context, transactionID uuid.UUID) error {
+	if err := s.repo.UpdateTransactionStatus(ctx, transactionID, StatusRefunded); err != nil {
+		return err
+	}
+
+	// Update escrow
+	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
+	if err == nil {
+		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowRefunded)
+	}
+
+	// Publish event
+	s.publishEvent(ctx, "transaction.refunded", map[string]any{
+		"transaction_id": transactionID,
+	})
+
+	return nil
 }
 
 // Helper to publish events asynchronously

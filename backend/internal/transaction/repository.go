@@ -299,6 +299,13 @@ func (r *Repository) UpdateEscrowStatus(ctx context.Context, id uuid.UUID, statu
 	return nil
 }
 
+// UpdateEscrowPaymentIntent updates the Stripe payment intent ID on an escrow.
+func (r *Repository) UpdateEscrowPaymentIntent(ctx context.Context, id uuid.UUID, paymentIntentID string) error {
+	query := `UPDATE escrow_accounts SET stripe_payment_intent_id = $1, updated_at = NOW() WHERE id = $2`
+	_, err := r.pool.Exec(ctx, query, paymentIntentID, id)
+	return err
+}
+
 // --- Rating Operations ---
 
 // CreateRating creates a rating for a transaction.

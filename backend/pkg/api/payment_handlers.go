@@ -150,6 +150,7 @@ func (h *PaymentHandler) handlePaymentSucceeded(ctx context.Context, data []byte
 	var pi struct {
 		ID       string            `json:"id"`
 		Metadata map[string]string `json:"metadata"`
+		Status   string            `json:"status"`
 	}
 	if err := json.Unmarshal(data, &pi); err != nil {
 		return
@@ -166,15 +167,62 @@ func (h *PaymentHandler) handlePaymentSucceeded(ctx context.Context, data []byte
 		return
 	}
 
-	// Update transaction escrow status
-	// Note: In a real implementation, you'd update the escrow_accounts table
-	_ = transactionID
+	// For manual capture (escrow), "succeeded" means funds are captured
+	// For automatic capture or when status is "requires_capture", mark as funded
+	if pi.Status == "requires_capture" || pi.Status == "succeeded" {
+		h.transactionService.ConfirmEscrowFunded(ctx, transactionID, pi.ID)
+	}
 }
 
 func (h *PaymentHandler) handlePaymentFailed(ctx context.Context, data []byte) {
-	// Handle payment failure - notify buyer, update status
+	var pi struct {
+		ID       string            `json:"id"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(data, &pi); err != nil {
+		return
+	}
+
+	transactionIDStr, ok := pi.Metadata["transaction_id"]
+	if !ok {
+		return
+	}
+
+	transactionID, err := uuid.Parse(transactionIDStr)
+	if err != nil {
+		return
+	}
+
+	// Get transaction and publish failure event
+	tx, err := h.transactionService.GetTransaction(ctx, transactionID)
+	if err != nil {
+		return
+	}
+
+	// Publish payment failed event for notification
+	// The transaction stays in "pending" - buyer can retry
+	_ = tx // Would use for notification
 }
 
 func (h *PaymentHandler) handleRefund(ctx context.Context, data []byte) {
-	// Handle refund - update transaction status
+	var charge struct {
+		PaymentIntent string            `json:"payment_intent"`
+		Metadata      map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(data, &charge); err != nil {
+		return
+	}
+
+	transactionIDStr, ok := charge.Metadata["transaction_id"]
+	if !ok {
+		return
+	}
+
+	transactionID, err := uuid.Parse(transactionIDStr)
+	if err != nil {
+		return
+	}
+
+	// Mark transaction as refunded
+	h.transactionService.RefundTransaction(ctx, transactionID)
 }

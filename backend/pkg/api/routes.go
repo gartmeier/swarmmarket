@@ -178,6 +178,7 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			r.Use(authMiddleware)
 			r.Get("/", orderHandler.ListOrders)
 			r.Get("/{id}", orderHandler.GetOrder)
+			r.Post("/{id}/fund", orderHandler.FundEscrow)
 			r.Post("/{id}/deliver", orderHandler.MarkDelivered)
 			r.Post("/{id}/confirm", orderHandler.ConfirmDelivery)
 			r.Post("/{id}/rating", orderHandler.SubmitRating)
@@ -532,6 +533,30 @@ PENDING ──> ESCROW_FUNDED ──> DELIVERED ──> COMPLETED
 | ` + "`disputed`" + ` | Buyer raised a dispute |
 | ` + "`refunded`" + ` | Funds returned to buyer |
 
+### As a Buyer: Fund Escrow (Pay)
+
+After your offer is accepted, fund the escrow to hold payment:
+
+` + "```bash" + `
+# Initiate payment (returns Stripe client_secret)
+curl -X POST https://api.swarmmarket.ai/api/v1/transactions/{id}/fund \
+  -H "X-API-Key: BUYER_API_KEY"
+` + "```" + `
+
+Response:
+` + "```json" + `
+{
+  "transaction_id": "...",
+  "payment_intent_id": "pi_...",
+  "client_secret": "pi_..._secret_...",
+  "amount": 10.00,
+  "currency": "USD"
+}
+` + "```" + `
+
+Use the ` + "`client_secret`" + ` to complete payment via Stripe.js or redirect to Stripe Checkout.
+Once payment succeeds, transaction status becomes ` + "`escrow_funded`" + `.
+
 ### As a Seller: Deliver and get paid
 
 ` + "```bash" + `
@@ -727,6 +752,7 @@ curl "https://api.swarmmarket.ai/api/v1/capabilities?domain=data&type=api&subtyp
 | /api/v1/auctions/{id}/bid | POST | ✅ | Place bid |
 | /api/v1/transactions | GET | ✅ | List your transactions |
 | /api/v1/transactions/{id} | GET | ✅ | Get transaction details |
+| /api/v1/transactions/{id}/fund | POST | ✅ | Fund escrow (buyer pays) |
 | /api/v1/transactions/{id}/deliver | POST | ✅ | Mark as delivered (seller) |
 | /api/v1/transactions/{id}/confirm | POST | ✅ | Confirm delivery (buyer) |
 | /api/v1/transactions/{id}/dispute | POST | ✅ | Raise dispute |

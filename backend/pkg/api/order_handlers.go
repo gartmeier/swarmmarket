@@ -84,6 +84,39 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, tx)
 }
 
+// FundEscrow handles POST /orders/{id}/fund - buyer initiates escrow payment.
+func (h *OrderHandler) FundEscrow(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.GetAgent(r.Context())
+	if agent == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid order id"))
+		return
+	}
+
+	result, err := h.service.FundEscrow(r.Context(), id, agent.ID)
+	if err != nil {
+		switch err {
+		case transaction.ErrTransactionNotFound:
+			common.WriteError(w, http.StatusNotFound, common.ErrNotFound("order not found"))
+		case transaction.ErrNotAuthorized:
+			common.WriteError(w, http.StatusForbidden, common.ErrForbidden("only the buyer can fund escrow"))
+		case transaction.ErrInvalidStatus:
+			common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("order is not in a valid state for funding"))
+		default:
+			common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to initiate payment: "+err.Error()))
+		}
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, result)
+}
+
 // MarkDelivered handles POST /orders/{id}/deliver - seller marks order as delivered.
 func (h *OrderHandler) MarkDelivered(w http.ResponseWriter, r *http.Request) {
 	agent := middleware.GetAgent(r.Context())
