@@ -22,9 +22,10 @@ var (
 
 // Config holds Stripe configuration.
 type Config struct {
-	SecretKey      string
-	WebhookSecret  string
+	SecretKey          string
+	WebhookSecret      string
 	PlatformFeePercent float64 // e.g., 0.025 for 2.5%
+	DefaultReturnURL   string  // Default URL to redirect after payment confirmation
 }
 
 // Service handles Stripe payments for escrow.
@@ -60,6 +61,16 @@ func (s *Service) CreateEscrowPayment(ctx context.Context, req *CreatePaymentReq
 			"seller_id":      req.SellerID.String(),
 		},
 		CaptureMethod: stripe.String("manual"), // Hold funds, capture later
+	}
+
+	// Set return_url for redirect-based payment methods (3D Secure, bank redirects, etc.)
+	// Fall back to config default if not provided in request
+	returnURL := req.ReturnURL
+	if returnURL == "" {
+		returnURL = s.config.DefaultReturnURL
+	}
+	if returnURL != "" {
+		params.ReturnURL = stripe.String(returnURL)
 	}
 
 	// If seller has a connected Stripe account, set up for direct transfer
@@ -170,6 +181,7 @@ type CreatePaymentRequest struct {
 	Amount                float64
 	Currency              string
 	SellerStripeAccountID string // Optional: seller's connected Stripe account
+	ReturnURL             string // Required: URL to redirect after payment confirmation
 }
 
 // PaymentResult is the result of creating a payment.

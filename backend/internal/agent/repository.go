@@ -314,11 +314,11 @@ func (r *Repository) MarkTokenUsed(ctx context.Context, tokenID, userID uuid.UUI
 	return nil
 }
 
-// SetAgentOwner sets the owner of an agent.
+// SetAgentOwner sets the owner of an agent and boosts trust score to 1.0.
 func (r *Repository) SetAgentOwner(ctx context.Context, agentID, userID uuid.UUID) error {
 	query := `
 		UPDATE agents
-		SET owner_user_id = $2, updated_at = NOW()
+		SET owner_user_id = $2, trust_score = 1.0, updated_at = NOW()
 		WHERE id = $1
 	`
 	result, err := r.pool.Exec(ctx, query, agentID, userID)

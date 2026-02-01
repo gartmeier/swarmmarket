@@ -24,9 +24,11 @@ const (
 	ErrCodeForbidden           = "FORBIDDEN"
 	ErrCodeNotFound            = "NOT_FOUND"
 	ErrCodeConflict            = "CONFLICT"
+	ErrCodeGone                = "GONE"
 	ErrCodeUnprocessableEntity = "UNPROCESSABLE_ENTITY"
 	ErrCodeTooManyRequests     = "TOO_MANY_REQUESTS"
 	ErrCodeInternalServer      = "INTERNAL_SERVER_ERROR"
+	ErrCodeServiceUnavailable  = "SERVICE_UNAVAILABLE"
 )
 
 // NewAPIError creates a new API error.
@@ -66,6 +68,16 @@ func ErrConflict(message string) *APIError {
 // ErrTooManyRequests creates a rate limit error.
 func ErrTooManyRequests(message string) *APIError {
 	return NewAPIError(ErrCodeTooManyRequests, message, nil)
+}
+
+// ErrGone creates a gone (410) error.
+func ErrGone(message string) *APIError {
+	return NewAPIError(ErrCodeGone, message, nil)
+}
+
+// ErrServiceUnavailable creates a service unavailable error.
+func ErrServiceUnavailable(message string) *APIError {
+	return NewAPIError(ErrCodeServiceUnavailable, message, nil)
 }
 
 // ErrInternalServer creates an internal server error.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/kelseyhightower/envconfig"
 )
 
@@ -15,6 +16,8 @@ type Config struct {
 	Auth     AuthConfig
 	Stripe   StripeConfig
 	Clerk    ClerkConfig
+	Twitter  TwitterConfig
+	Trust    TrustConfig
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -86,6 +89,7 @@ type StripeConfig struct {
 	SecretKey          string  `envconfig:"STRIPE_SECRET_KEY" default:""`
 	WebhookSecret      string  `envconfig:"STRIPE_WEBHOOK_SECRET" default:""`
 	PlatformFeePercent float64 `envconfig:"STRIPE_PLATFORM_FEE_PERCENT" default:"0.025"` // 2.5%
+	DefaultReturnURL   string  `envconfig:"STRIPE_DEFAULT_RETURN_URL" default:""`        // URL for redirect after payment confirmation
 }
 
 // ClerkConfig holds Clerk authentication configuration.
@@ -94,8 +98,25 @@ type ClerkConfig struct {
 	SecretKey      string `envconfig:"CLERK_SECRET_KEY" default:""`
 }
 
+// TwitterConfig holds Twitter API configuration for verification.
+type TwitterConfig struct {
+	BearerToken string `envconfig:"TWITTER_BEARER_TOKEN" default:""`
+}
+
+// TrustConfig holds trust system configuration.
+type TrustConfig struct {
+	TwitterTrustBonus    float64 `envconfig:"TRUST_TWITTER_BONUS" default:"0.15"`
+	MaxTransactionBonus  float64 `envconfig:"TRUST_MAX_TRANSACTION_BONUS" default:"0.25"`
+	MaxRatingBonus       float64 `envconfig:"TRUST_MAX_RATING_BONUS" default:"0.10"`
+	TransactionDecayRate float64 `envconfig:"TRUST_TRANSACTION_DECAY_RATE" default:"0.05"`
+}
+
 // Load reads configuration from environment variables.
+// It first attempts to load a .env file if present.
 func Load() (*Config, error) {
+	// Load .env file if it exists (ignore error if not found)
+	_ = godotenv.Load()
+
 	var cfg Config
 	if err := envconfig.Process("", &cfg); err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)

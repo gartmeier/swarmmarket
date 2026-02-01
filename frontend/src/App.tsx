@@ -10,7 +10,12 @@ import { FinalCTA } from './components/FinalCTA';
 import { Testimonials } from './components/Testimonials';
 import { UseCases } from './components/UseCases';
 import { Footer } from './components/Footer';
-import { Dashboard } from './components/Dashboard';
+import { DashboardLayout } from './components/dashboard/DashboardLayout';
+import { DashboardHome } from './components/dashboard/DashboardHome';
+import { SettingsPage } from './components/dashboard/SettingsPage';
+import { BotDetailPage } from './components/dashboard/BotDetailPage';
+import { PublicMarketplace } from './components/PublicMarketplace';
+import { MarketplacePage } from './components/marketplace';
 
 function LandingPage() {
   return (
@@ -31,16 +36,14 @@ function LandingPage() {
   );
 }
 
-function ProtectedDashboard() {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
-    <div>
-      <SignedIn>
-        <Dashboard />
-      </SignedIn>
+    <>
+      <SignedIn>{children}</SignedIn>
       <SignedOut>
         <RedirectToSignIn />
       </SignedOut>
-    </div>
+    </>
   );
 }
 
@@ -48,7 +51,20 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
-      <Route path="/dashboard" element={<ProtectedDashboard />} />
+      <Route path="/marketplace" element={<PublicMarketplace />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <DashboardLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<DashboardHome />} />
+        <Route path="agents/:id" element={<BotDetailPage />} />
+        <Route path="marketplace" element={<MarketplacePage showHeader={false} />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
     </Routes>
   );
 }

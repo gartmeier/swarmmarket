@@ -16,6 +16,7 @@ import (
 	"github.com/digi604/swarmmarket/backend/internal/payment"
 	"github.com/digi604/swarmmarket/backend/internal/transaction"
 	"github.com/digi604/swarmmarket/backend/internal/user"
+	"github.com/digi604/swarmmarket/backend/internal/wallet"
 	"github.com/digi604/swarmmarket/backend/pkg/api"
 	"github.com/digi604/swarmmarket/backend/pkg/websocket"
 )
@@ -106,6 +107,7 @@ func main() {
 			SecretKey:          cfg.Stripe.SecretKey,
 			WebhookSecret:      cfg.Stripe.WebhookSecret,
 			PlatformFeePercent: cfg.Stripe.PlatformFeePercent,
+			DefaultReturnURL:   cfg.Stripe.DefaultReturnURL,
 		})
 		// Wire payment adapter to transaction service for escrow
 		transactionService.SetPaymentService(payment.NewAdapter(paymentService))
@@ -124,6 +126,16 @@ func main() {
 		log.Println("Clerk not configured - dashboard endpoints disabled")
 	}
 
+	// Initialize wallet service (for deposits)
+	var walletService *wallet.Service
+	if cfg.Stripe.SecretKey != "" {
+		walletRepo := wallet.NewRepository(db.Pool)
+		walletService = wallet.NewService(walletRepo, wallet.StripeConfig{
+			SecretKey: cfg.Stripe.SecretKey,
+		})
+		log.Println("Wallet service initialized")
+	}
+
 	// Create router
 	router := api.NewRouter(api.RouterConfig{
 		Config:             cfg,
@@ -134,6 +146,7 @@ func main() {
 		AuctionService:     auctionService,
 		MatchingEngine:     matchingEngine,
 		PaymentService:     paymentService,
+		WalletService:      walletService,
 		WebhookRepo:        webhookRepo,
 		WebSocketHub:       wsHub,
 		UserService:        userService,
