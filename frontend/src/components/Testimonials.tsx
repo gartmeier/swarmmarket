@@ -57,9 +57,11 @@ export function Testimonials() {
                 {testimonial.quote}
               </p>
               <div className="flex items-center gap-4 mt-auto">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#22D3EE] to-[#A855F7] flex items-center justify-center text-white font-bold text-lg">
-                  {testimonial.name.charAt(0)}
-                </div>
+                <img
+                  src={testimonial.avatar}
+                  alt={testimonial.name}
+                  className="w-14 h-14 rounded-full object-cover"
+                />
                 <div className="flex flex-col gap-0.5">
                   <span className="text-white font-semibold text-sm">{testimonial.name}</span>
                   <span className="text-[#64748B] text-xs">{testimonial.role}</span>

@@ -166,19 +166,19 @@ export function Particles() {
     };
 
     const updateParticle = (p: Particle) => {
-      // Get scroll intensity - scales directly with scroll speed (no upper cap)
+      // Get scroll intensity - scales directly with scroll speed
       const scrollSpeed = Math.abs(scrollVelocityRef.current);
-      const scrollIntensity = scrollSpeed / 20; // More responsive to scroll speed
+      const scrollIntensity = scrollSpeed / 5; // Faster response to scroll
 
-      // Only update trail and position when scrolling
-      if (scrollSpeed > 0.5) {
+      // Only update trail and position when scrolling (low threshold for smooth ease-out)
+      if (scrollSpeed > 0.1) {
         // Update trail
         p.trail.unshift({ x: p.x, y: p.y, alpha: p.alpha });
         if (p.trail.length > 8) p.trail.pop();
         p.trail.forEach((t) => (t.alpha *= 0.85));
 
         // Wave motion - scaled by scroll speed
-        const waveScale = Math.min(scrollIntensity, 2); // Cap wave effect
+        const waveScale = Math.min(scrollIntensity, 4); // Cap wave effect
         const waveX = Math.sin(timeRef.current * 0.02 + p.waveOffset) * p.waveAmplitude * waveScale;
         const waveY = Math.cos(timeRef.current * 0.015 + p.waveOffset) * p.waveAmplitude * waveScale;
 
@@ -210,7 +210,7 @@ export function Particles() {
         }
 
         // Apply forces - movement speed proportional to scroll speed
-        const speedMultiplier = Math.min(scrollIntensity, 5); // Cap at 5x for very fast scrolls
+        const speedMultiplier = Math.min(scrollIntensity, 10); // Cap at 10x for very fast scrolls
         p.vx = (p.baseVx + waveX + mouseForceX + gravityForceX) * speedMultiplier;
         p.vy = (p.baseVy + waveY + mouseForceY + gravityForceY) * speedMultiplier;
 
@@ -235,8 +235,8 @@ export function Particles() {
       timeRef.current++;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Decay scroll velocity
-      scrollVelocityRef.current *= 0.95;
+      // Gentle ease-out over ~0.7s (0.96^42 ≈ 0.18, feels more linear)
+      scrollVelocityRef.current *= 0.96;
 
       particlesRef.current.forEach(updateParticle);
       drawConnections();
@@ -248,18 +248,9 @@ export function Particles() {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
       const delta = currentScrollY - lastScrollYRef.current;
-      scrollVelocityRef.current = delta;
+      // Add momentum - blend new scroll with existing velocity for smoother feel
+      scrollVelocityRef.current = scrollVelocityRef.current * 0.5 + delta * 0.5;
       lastScrollYRef.current = currentScrollY;
-
-      // Clear existing timeout
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-
-      // Set timeout to stop movement after scrolling stops
-      scrollTimeoutRef.current = setTimeout(() => {
-        scrollVelocityRef.current = 0;
-      }, 150);
     };
 
     const handleMouseMove = (e: MouseEvent) => {
