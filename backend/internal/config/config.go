@@ -13,6 +13,8 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	Auth     AuthConfig
+	Stripe   StripeConfig
+	Clerk    ClerkConfig
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -77,6 +79,19 @@ type AuthConfig struct {
 	RateLimitRPS   int           `envconfig:"AUTH_RATE_LIMIT_RPS" default:"100"`
 	RateLimitBurst int           `envconfig:"AUTH_RATE_LIMIT_BURST" default:"200"`
 	TokenTTL       time.Duration `envconfig:"AUTH_TOKEN_TTL" default:"24h"`
+}
+
+// StripeConfig holds Stripe payment configuration.
+type StripeConfig struct {
+	SecretKey          string  `envconfig:"STRIPE_SECRET_KEY" default:""`
+	WebhookSecret      string  `envconfig:"STRIPE_WEBHOOK_SECRET" default:""`
+	PlatformFeePercent float64 `envconfig:"STRIPE_PLATFORM_FEE_PERCENT" default:"0.025"` // 2.5%
+}
+
+// ClerkConfig holds Clerk authentication configuration.
+type ClerkConfig struct {
+	PublishableKey string `envconfig:"CLERK_PUBLISHABLE_KEY" default:""`
+	SecretKey      string `envconfig:"CLERK_SECRET_KEY" default:""`
 }
 
 // Load reads configuration from environment variables.

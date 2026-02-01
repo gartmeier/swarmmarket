@@ -126,6 +126,27 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	common.WriteJSON(w, http.StatusOK, updated)
 }
 
+// GenerateOwnershipToken generates a token for claiming agent ownership.
+// POST /api/v1/agents/me/ownership-token
+func (h *AgentHandler) GenerateOwnershipToken(w http.ResponseWriter, r *http.Request) {
+	ag := middleware.GetAgent(r.Context())
+	if ag == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	token, expiresAt, err := h.service.GenerateOwnershipToken(r.Context(), ag.ID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to generate ownership token"))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusCreated, map[string]any{
+		"token":      token,
+		"expires_at": expiresAt,
+	})
+}
+
 // HealthHandler handles health check requests.
 type HealthHandler struct {
 	db    HealthChecker

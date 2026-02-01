@@ -20,6 +20,7 @@ all: build
 ## Build
 build: ## Build all binaries
 	$(GOBUILD) -o $(API_BINARY) ./cmd/api
+	$(GOBUILD) -o $(WORKER_BINARY) ./cmd/worker
 
 build-api: ## Build API binary
 	$(GOBUILD) -o $(API_BINARY) ./cmd/api

@@ -153,3 +153,92 @@ func (s *Service) hashAPIKey(apiKey string) string {
 	hash := sha256.Sum256([]byte(apiKey))
 	return hex.EncodeToString(hash[:])
 }
+
+// GenerateOwnershipToken generates a token for claiming agent ownership.
+// The token expires after 24 hours.
+func (s *Service) GenerateOwnershipToken(ctx context.Context, agentID uuid.UUID) (string, time.Time, error) {
+	// Verify agent exists
+	_, err := s.repo.GetByID(ctx, agentID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	// Generate token
+	token, err := s.generateOwnershipToken()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to generate ownership token: %w", err)
+	}
+
+	// Hash and store
+	tokenHash := s.hashToken(token)
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
+
+	if err := s.repo.CreateOwnershipToken(ctx, agentID, tokenHash, expiresAt); err != nil {
+		return "", time.Time{}, err
+	}
+
+	return token, expiresAt, nil
+}
+
+// ClaimOwnership claims ownership of an agent using an ownership token.
+func (s *Service) ClaimOwnership(ctx context.Context, userID uuid.UUID, token string) (*Agent, error) {
+	tokenHash := s.hashToken(token)
+
+	// Get the token
+	ownershipToken, err := s.repo.GetOwnershipTokenByHash(ctx, tokenHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if token is expired
+	if time.Now().After(ownershipToken.ExpiresAt) {
+		return nil, ErrTokenExpired
+	}
+
+	// Check if token is already used
+	if ownershipToken.UsedAt != nil {
+		return nil, ErrTokenAlreadyUsed
+	}
+
+	// Check if agent already has an owner
+	existingOwner, err := s.repo.GetAgentOwnerID(ctx, ownershipToken.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if existingOwner != nil {
+		return nil, ErrAgentAlreadyOwned
+	}
+
+	// Mark token as used
+	if err := s.repo.MarkTokenUsed(ctx, ownershipToken.ID, userID); err != nil {
+		return nil, err
+	}
+
+	// Set agent owner
+	if err := s.repo.SetAgentOwner(ctx, ownershipToken.AgentID, userID); err != nil {
+		return nil, err
+	}
+
+	// Return the claimed agent
+	return s.repo.GetByID(ctx, ownershipToken.AgentID)
+}
+
+// GetAgentsByOwner retrieves all agents owned by a user.
+func (s *Service) GetAgentsByOwner(ctx context.Context, userID uuid.UUID) ([]*Agent, error) {
+	return s.repo.GetAgentsByOwner(ctx, userID)
+}
+
+// generateOwnershipToken generates a cryptographically secure ownership token.
+func (s *Service) generateOwnershipToken() (string, error) {
+	bytes := make([]byte, 24) // 24 bytes = 48 hex chars
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return "own_" + hex.EncodeToString(bytes), nil
+}
+
+// hashToken creates a SHA-256 hash of a token.
+func (s *Service) hashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}

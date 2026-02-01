@@ -13,10 +13,16 @@ type EventPublisher interface {
 	Publish(ctx context.Context, eventType string, payload map[string]any) error
 }
 
+// TransactionCreator interface for creating transactions.
+type TransactionCreator interface {
+	CreateFromOffer(ctx context.Context, buyerID, sellerID uuid.UUID, requestID, offerID *uuid.UUID, amount float64, currency string) (uuid.UUID, error)
+}
+
 // Service handles marketplace business logic.
 type Service struct {
-	repo      *Repository
-	publisher EventPublisher
+	repo              *Repository
+	publisher         EventPublisher
+	transactionCreator TransactionCreator
 }
 
 // NewService creates a new marketplace service.
@@ -25,6 +31,11 @@ func NewService(repo *Repository, publisher EventPublisher) *Service {
 		repo:      repo,
 		publisher: publisher,
 	}
+}
+
+// SetTransactionCreator sets the transaction creator (to avoid circular dependency).
+func (s *Service) SetTransactionCreator(tc TransactionCreator) {
+	s.transactionCreator = tc
 }
 
 // --- Listings ---
@@ -247,15 +258,34 @@ func (s *Service) AcceptOffer(ctx context.Context, requesterID uuid.UUID, offerI
 	}
 	offer.Status = OfferStatusAccepted
 
+	// Create transaction if transaction creator is set
+	var transactionID *uuid.UUID
+	if s.transactionCreator != nil {
+		txID, err := s.transactionCreator.CreateFromOffer(
+			ctx,
+			request.RequesterID, // buyer
+			offer.OffererID,     // seller
+			&offer.RequestID,
+			&offer.ID,
+			offer.PriceAmount,
+			offer.PriceCurrency,
+		)
+		if err == nil {
+			transactionID = &txID
+		}
+	}
+
 	// Notify the offerer that their offer was accepted
-	s.publishEvent(ctx, "offer.accepted", map[string]any{
+	eventPayload := map[string]any{
 		"offer_id":     offer.ID,
 		"request_id":   offer.RequestID,
-		"offerer_id":   offer.OffererID, // Who to notify
+		"offerer_id":   offer.OffererID,
 		"requester_id": request.RequesterID,
-	})
-
-	// TODO: Create transaction, trigger escrow setup
+	}
+	if transactionID != nil {
+		eventPayload["transaction_id"] = *transactionID
+	}
+	s.publishEvent(ctx, "offer.accepted", eventPayload)
 
 	return offer, nil
 }

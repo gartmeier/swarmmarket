@@ -1,0 +1,276 @@
+package worker
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+	"github.com/digi604/swarmmarket/backend/internal/auction"
+	"github.com/digi604/swarmmarket/backend/internal/notification"
+)
+
+// Config holds worker configuration.
+type Config struct {
+	NotificationService *notification.Service
+	WebhookRepo         *notification.Repository
+	AuctionService      *auction.Service
+	AuctionRepo         *auction.Repository
+	RedisClient         *redis.Client
+}
+
+// Worker processes background tasks.
+type Worker struct {
+	notificationService *notification.Service
+	webhookRepo         *notification.Repository
+	auctionService      *auction.Service
+	auctionRepo         *auction.Repository
+	redis               *redis.Client
+}
+
+// New creates a new worker.
+func New(cfg Config) *Worker {
+	return &Worker{
+		notificationService: cfg.NotificationService,
+		webhookRepo:         cfg.WebhookRepo,
+		auctionService:      cfg.AuctionService,
+		auctionRepo:         cfg.AuctionRepo,
+		redis:               cfg.RedisClient,
+	}
+}
+
+// Run starts all worker goroutines.
+func (w *Worker) Run(ctx context.Context) error {
+	// Start event consumer
+	go w.consumeEvents(ctx)
+
+	// Start auction scheduler
+	go w.processAuctions(ctx)
+
+	// Start webhook delivery worker
+	go w.deliverWebhooks(ctx)
+
+	<-ctx.Done()
+	return nil
+}
+
+// consumeEvents listens for events from Redis streams and processes them.
+func (w *Worker) consumeEvents(ctx context.Context) {
+	streams := []string{
+		"events:request.created",
+		"events:offer.received",
+		"events:offer.accepted",
+		"events:listing.created",
+		"events:auction.started",
+		"events:bid.placed",
+		"events:auction.ended",
+		"events:transaction.created",
+		"events:transaction.delivered",
+		"events:transaction.completed",
+		"events:rating.submitted",
+		"events:dispute.opened",
+	}
+
+	// Build stream args
+	streamArgs := make([]string, len(streams)*2)
+	for i, s := range streams {
+		streamArgs[i*2] = s
+		streamArgs[i*2+1] = "$" // Start from latest
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// Read from streams with block timeout
+			result, err := w.redis.XRead(ctx, &redis.XReadArgs{
+				Streams: streamArgs,
+				Block:   5 * time.Second,
+				Count:   10,
+			}).Result()
+
+			if err != nil {
+				if err == redis.Nil {
+					continue
+				}
+				log.Printf("Worker: Error reading from streams: %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			for _, stream := range result {
+				for _, msg := range stream.Messages {
+					w.processEvent(ctx, stream.Stream, msg)
+				}
+			}
+		}
+	}
+}
+
+// processEvent handles a single event.
+func (w *Worker) processEvent(ctx context.Context, stream string, msg redis.XMessage) {
+	eventJSON, ok := msg.Values["event"].(string)
+	if !ok {
+		return
+	}
+
+	var event notification.Event
+	if err := json.Unmarshal([]byte(eventJSON), &event); err != nil {
+		log.Printf("Worker: Failed to unmarshal event: %v", err)
+		return
+	}
+
+	// Get webhooks subscribed to this event type
+	webhooks, err := w.webhookRepo.GetActiveWebhooksForEvent(ctx, string(event.Type))
+	if err != nil {
+		log.Printf("Worker: Failed to get webhooks: %v", err)
+		return
+	}
+
+	// Queue webhook deliveries
+	for _, webhook := range webhooks {
+		w.queueWebhookDelivery(ctx, webhook, event)
+	}
+}
+
+// queueWebhookDelivery queues a webhook for delivery.
+func (w *Worker) queueWebhookDelivery(ctx context.Context, webhook *notification.Webhook, event notification.Event) {
+	delivery := map[string]any{
+		"webhook_id": webhook.ID.String(),
+		"event":      event,
+		"attempt":    1,
+	}
+
+	data, _ := json.Marshal(delivery)
+	w.redis.LPush(ctx, "webhook_delivery_queue", data)
+}
+
+// deliverWebhooks processes the webhook delivery queue.
+func (w *Worker) deliverWebhooks(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			// Pop from queue with timeout
+			result, err := w.redis.BRPop(ctx, 5*time.Second, "webhook_delivery_queue").Result()
+			if err != nil {
+				if err == redis.Nil {
+					continue
+				}
+				time.Sleep(time.Second)
+				continue
+			}
+
+			if len(result) < 2 {
+				continue
+			}
+
+			var delivery struct {
+				WebhookID string             `json:"webhook_id"`
+				Event     notification.Event `json:"event"`
+				Attempt   int                `json:"attempt"`
+			}
+
+			if err := json.Unmarshal([]byte(result[1]), &delivery); err != nil {
+				log.Printf("Worker: Failed to unmarshal delivery: %v", err)
+				continue
+			}
+
+			webhookID, err := uuid.Parse(delivery.WebhookID)
+			if err != nil {
+				continue
+			}
+
+			webhook, err := w.webhookRepo.GetWebhookByID(ctx, webhookID)
+			if err != nil {
+				continue
+			}
+
+			// Deliver webhook
+			err = w.notificationService.DeliverWebhook(ctx, webhook, delivery.Event)
+			if err != nil {
+				log.Printf("Worker: Webhook delivery failed (attempt %d): %v", delivery.Attempt, err)
+				w.webhookRepo.RecordWebhookFailure(ctx, webhookID)
+
+				// Retry with exponential backoff (max 5 attempts)
+				if delivery.Attempt < 5 {
+					delivery.Attempt++
+					data, _ := json.Marshal(delivery)
+
+					// Delay based on attempt number
+					delay := time.Duration(delivery.Attempt*delivery.Attempt) * time.Second
+					time.AfterFunc(delay, func() {
+						w.redis.LPush(context.Background(), "webhook_delivery_queue", data)
+					})
+				}
+			} else {
+				w.webhookRepo.RecordWebhookSuccess(ctx, webhookID)
+			}
+		}
+	}
+}
+
+// processAuctions checks for auctions that need to be ended.
+func (w *Worker) processAuctions(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.endExpiredAuctions(ctx)
+		}
+	}
+}
+
+// endExpiredAuctions finds and ends auctions past their end time.
+func (w *Worker) endExpiredAuctions(ctx context.Context) {
+	// Search for active auctions that have ended
+	status := auction.AuctionStatusActive
+	result, err := w.auctionRepo.SearchAuctions(ctx, auction.SearchAuctionsParams{
+		Status: &status,
+		Limit:  100,
+	})
+	if err != nil {
+		log.Printf("Worker: Failed to search auctions: %v", err)
+		return
+	}
+
+	now := time.Now().UTC()
+	for _, auc := range result.Auctions {
+		if auc.EndsAt.Before(now) {
+			// End the auction
+			log.Printf("Worker: Ending expired auction %s", auc.ID)
+
+			// Get highest bid
+			highestBid, err := w.auctionRepo.GetHighestBid(ctx, auc.ID)
+			if err != nil {
+				log.Printf("Worker: Failed to get highest bid: %v", err)
+				continue
+			}
+
+			if highestBid != nil {
+				// Check reserve price
+				metReserve := true
+				if auc.ReservePrice != nil && highestBid.Amount < *auc.ReservePrice {
+					metReserve = false
+				}
+
+				if metReserve {
+					w.auctionRepo.SetAuctionWinner(ctx, auc.ID, highestBid.ID, highestBid.BidderID)
+					w.auctionRepo.UpdateBidStatus(ctx, highestBid.ID, auction.BidStatusWon)
+				} else {
+					w.auctionRepo.UpdateAuctionStatus(ctx, auc.ID, auction.AuctionStatusEnded)
+				}
+			} else {
+				w.auctionRepo.UpdateAuctionStatus(ctx, auc.ID, auction.AuctionStatusEnded)
+			}
+		}
+	}
+}

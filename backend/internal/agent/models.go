@@ -21,6 +21,7 @@ type Agent struct {
 	Name              string            `json:"name"`
 	Description       string            `json:"description,omitempty"`
 	OwnerEmail        string            `json:"owner_email,omitempty"`
+	OwnerUserID       *uuid.UUID        `json:"owner_user_id,omitempty"` // Human owner
 	APIKeyHash        string            `json:"-"` // Never expose
 	APIKeyPrefix      string            `json:"api_key_prefix,omitempty"`
 	VerificationLevel VerificationLevel `json:"verification_level"`

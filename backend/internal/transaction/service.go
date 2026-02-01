@@ -1,0 +1,298 @@
+package transaction
+
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+)
+
+var (
+	ErrInvalidStatus       = errors.New("invalid transaction status for this operation")
+	ErrNotAuthorized       = errors.New("not authorized to perform this action")
+	ErrInvalidRating       = errors.New("rating score must be between 1 and 5")
+	ErrCannotRateYourself  = errors.New("cannot rate yourself")
+	ErrTransactionNotReady = errors.New("transaction is not ready for this operation")
+)
+
+// EventPublisher publishes events to the notification system.
+type EventPublisher interface {
+	Publish(ctx context.Context, eventType string, payload map[string]any) error
+}
+
+// Service handles transaction business logic.
+type Service struct {
+	repo      *Repository
+	publisher EventPublisher
+}
+
+// NewService creates a new transaction service.
+func NewService(repo *Repository, publisher EventPublisher) *Service {
+	return &Service{
+		repo:      repo,
+		publisher: publisher,
+	}
+}
+
+// CreateFromOffer creates a transaction from an accepted offer (implements marketplace.TransactionCreator).
+func (s *Service) CreateFromOffer(ctx context.Context, buyerID, sellerID uuid.UUID, requestID, offerID *uuid.UUID, amount float64, currency string) (uuid.UUID, error) {
+	tx, err := s.CreateTransaction(ctx, &CreateTransactionRequest{
+		BuyerID:   buyerID,
+		SellerID:  sellerID,
+		RequestID: requestID,
+		OfferID:   offerID,
+		Amount:    amount,
+		Currency:  currency,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return tx.ID, nil
+}
+
+// CreateTransaction creates a new transaction (called when offer is accepted).
+func (s *Service) CreateTransaction(ctx context.Context, req *CreateTransactionRequest) (*Transaction, error) {
+	// Create the transaction
+	tx, err := s.repo.CreateTransaction(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create escrow account
+	_, err = s.repo.CreateEscrowAccount(ctx, tx.ID, tx.Amount, tx.Currency)
+	if err != nil {
+		// Log but don't fail - escrow can be created later
+	}
+
+	// Publish event
+	s.publishEvent(ctx, "transaction.created", map[string]any{
+		"transaction_id": tx.ID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+		"amount":         tx.Amount,
+		"currency":       tx.Currency,
+	})
+
+	return tx, nil
+}
+
+// GetTransaction retrieves a transaction by ID.
+func (s *Service) GetTransaction(ctx context.Context, id uuid.UUID) (*Transaction, error) {
+	return s.repo.GetTransactionByID(ctx, id)
+}
+
+// ListTransactions retrieves transactions for an agent.
+func (s *Service) ListTransactions(ctx context.Context, params ListTransactionsParams) (*TransactionListResult, error) {
+	if params.Limit <= 0 {
+		params.Limit = 20
+	}
+	if params.Limit > 100 {
+		params.Limit = 100
+	}
+	return s.repo.ListTransactions(ctx, params)
+}
+
+// ConfirmDelivery confirms that goods/services have been delivered.
+// Only the buyer can confirm delivery.
+func (s *Service) ConfirmDelivery(ctx context.Context, transactionID, agentID uuid.UUID) (*Transaction, error) {
+	// Get transaction
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only buyer can confirm delivery
+	if tx.BuyerID != agentID {
+		return nil, ErrNotAuthorized
+	}
+
+	// Check status - must be pending or escrow_funded
+	if tx.Status != StatusPending && tx.Status != StatusEscrowFunded {
+		return nil, ErrInvalidStatus
+	}
+
+	// Update transaction
+	if err := s.repo.ConfirmDelivery(ctx, transactionID); err != nil {
+		return nil, err
+	}
+
+	// Get updated transaction
+	tx, _ = s.repo.GetTransactionByID(ctx, transactionID)
+
+	// Publish event
+	s.publishEvent(ctx, "transaction.delivered", map[string]any{
+		"transaction_id": transactionID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+	})
+
+	return tx, nil
+}
+
+// CompleteTransaction marks a transaction as completed and releases escrow.
+func (s *Service) CompleteTransaction(ctx context.Context, transactionID uuid.UUID) (*Transaction, error) {
+	// Get transaction
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check status - must be delivered
+	if tx.Status != StatusDelivered {
+		return nil, ErrInvalidStatus
+	}
+
+	// Complete transaction
+	if err := s.repo.CompleteTransaction(ctx, transactionID); err != nil {
+		return nil, err
+	}
+
+	// Release escrow
+	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
+	if err == nil {
+		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowReleased)
+	}
+
+	// Update agent stats
+	s.repo.UpdateAgentStats(ctx, tx.BuyerID, true)
+	s.repo.UpdateAgentStats(ctx, tx.SellerID, true)
+
+	// Get updated transaction
+	tx, _ = s.repo.GetTransactionByID(ctx, transactionID)
+
+	// Publish event
+	s.publishEvent(ctx, "transaction.completed", map[string]any{
+		"transaction_id": transactionID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+		"amount":         tx.Amount,
+	})
+
+	return tx, nil
+}
+
+// SubmitRating submits a rating for a completed transaction.
+func (s *Service) SubmitRating(ctx context.Context, transactionID, raterID uuid.UUID, req *SubmitRatingRequest) (*Rating, error) {
+	// Validate rating score
+	if req.Score < 1 || req.Score > 5 {
+		return nil, ErrInvalidRating
+	}
+
+	// Get transaction
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check transaction is completed or delivered
+	if tx.Status != StatusCompleted && tx.Status != StatusDelivered {
+		return nil, ErrTransactionNotReady
+	}
+
+	// Determine who is being rated
+	var ratedAgentID uuid.UUID
+	if raterID == tx.BuyerID {
+		ratedAgentID = tx.SellerID // Buyer rates seller
+	} else if raterID == tx.SellerID {
+		ratedAgentID = tx.BuyerID // Seller rates buyer
+	} else {
+		return nil, ErrNotAuthorized
+	}
+
+	// Check hasn't already rated
+	hasRated, err := s.repo.HasRated(ctx, transactionID, raterID)
+	if err != nil {
+		return nil, err
+	}
+	if hasRated {
+		return nil, ErrRatingAlreadyExists
+	}
+
+	// Create rating
+	rating := &Rating{
+		TransactionID: transactionID,
+		RaterID:       raterID,
+		RatedAgentID:  ratedAgentID,
+		Score:         req.Score,
+		Comment:       req.Comment,
+	}
+
+	if err := s.repo.CreateRating(ctx, rating); err != nil {
+		return nil, err
+	}
+
+	// Recalculate rated agent's average rating
+	s.repo.RecalculateAgentRating(ctx, ratedAgentID)
+
+	// If transaction was delivered and both parties have rated, complete it
+	if tx.Status == StatusDelivered {
+		ratings, _ := s.repo.GetRatingsByTransactionID(ctx, transactionID)
+		if len(ratings) >= 2 {
+			s.CompleteTransaction(ctx, transactionID)
+		}
+	}
+
+	// Publish event
+	s.publishEvent(ctx, "rating.submitted", map[string]any{
+		"transaction_id": transactionID,
+		"rater_id":       raterID,
+		"rated_agent_id": ratedAgentID,
+		"score":          req.Score,
+	})
+
+	return rating, nil
+}
+
+// GetTransactionRatings retrieves all ratings for a transaction.
+func (s *Service) GetTransactionRatings(ctx context.Context, transactionID uuid.UUID) ([]*Rating, error) {
+	return s.repo.GetRatingsByTransactionID(ctx, transactionID)
+}
+
+// DisputeTransaction opens a dispute on a transaction.
+func (s *Service) DisputeTransaction(ctx context.Context, transactionID, agentID uuid.UUID, req *DisputeRequest) (*Transaction, error) {
+	// Get transaction
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Must be buyer or seller
+	if tx.BuyerID != agentID && tx.SellerID != agentID {
+		return nil, ErrNotAuthorized
+	}
+
+	// Can only dispute certain statuses
+	if tx.Status != StatusPending && tx.Status != StatusEscrowFunded && tx.Status != StatusDelivered {
+		return nil, ErrInvalidStatus
+	}
+
+	// Update status
+	if err := s.repo.UpdateTransactionStatus(ctx, transactionID, StatusDisputed); err != nil {
+		return nil, err
+	}
+
+	// Update escrow
+	escrow, err := s.repo.GetEscrowByTransactionID(ctx, transactionID)
+	if err == nil {
+		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowDisputed)
+	}
+
+	// Get updated transaction
+	tx, _ = s.repo.GetTransactionByID(ctx, transactionID)
+
+	// Publish event
+	s.publishEvent(ctx, "dispute.opened", map[string]any{
+		"transaction_id": transactionID,
+		"opened_by":      agentID,
+		"reason":         req.Reason,
+	})
+
+	return tx, nil
+}
+
+// Helper to publish events asynchronously
+func (s *Service) publishEvent(ctx context.Context, eventType string, payload map[string]any) {
+	if s.publisher != nil {
+		go s.publisher.Publish(ctx, eventType, payload)
+	}
+}
