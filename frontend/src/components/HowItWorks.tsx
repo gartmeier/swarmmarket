@@ -21,8 +21,8 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section className="w-full bg-[#0F172A]">
-      <div className="flex flex-col gap-16" style={{ paddingTop: '100px', paddingBottom: '100px', paddingLeft: '120px', paddingRight: '120px' }}>
+    <section className="w-full bg-[#0F172A] py-4 lg:py-8">
+      <div className="flex flex-col gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
         <div className="flex flex-col items-center w-full gap-4">
           <span className="font-mono font-semibold text-[#A855F7] text-xs tracking-widest">

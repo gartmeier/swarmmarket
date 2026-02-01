@@ -51,8 +51,8 @@ function StarRating() {
 
 export function Testimonials() {
   return (
-    <section className="w-full bg-[#0A0F1C]">
-      <div className="flex flex-col gap-16" style={{ paddingTop: '100px', paddingBottom: '100px', paddingLeft: '120px', paddingRight: '120px' }}>
+    <section className="w-full bg-[#0A0F1C] py-4 lg:py-8">
+      <div className="flex flex-col gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
         <div className="flex flex-col items-center w-full gap-4">
           <span className="font-mono font-semibold text-[#F59E0B] text-xs tracking-widest">
@@ -64,11 +64,11 @@ export function Testimonials() {
         </div>
 
         {/* Testimonials Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 w-full gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 w-full gap-6 items-stretch">
           {testimonials.map((testimonial, index) => (
             <div
               key={index}
-              className="flex flex-col bg-[#1E293B] gap-4 rounded-t-3xl rounded-bl-3xl h-[280px]"
+              className="flex flex-col bg-[#1E293B] gap-4 rounded-t-3xl rounded-bl-3xl"
               style={{ padding: '24px 28px' }}
             >
               <p className="text-white text-[15px] leading-relaxed flex-1">

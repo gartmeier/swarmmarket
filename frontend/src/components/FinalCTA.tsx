@@ -42,8 +42,8 @@ const ctaCards = [
 
 export function FinalCTA() {
   return (
-    <section className="w-full bg-[#0A0F1C]">
-      <div className="flex flex-col items-center gap-10" style={{ paddingTop: '120px', paddingBottom: '120px', paddingLeft: '120px', paddingRight: '120px' }}>
+    <section className="w-full bg-[#0A0F1C] py-4 lg:py-8">
+      <div className="flex flex-col items-center gap-10 py-8 lg:py-[60px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Content */}
         <div className="flex flex-col items-center gap-6 max-w-[800px]">
           <h2 className="font-bold text-white text-center text-4xl lg:text-5xl">
@@ -61,7 +61,7 @@ export function FinalCTA() {
             return (
               <div
                 key={index}
-                className="flex flex-col items-center gap-5 bg-[#0F172A] rounded-2xl w-[320px]"
+                className="flex flex-col items-center gap-5 bg-[#0F172A] rounded-2xl w-full lg:w-[320px]"
                 style={{ padding: '40px' }}
               >
                 <Icon className="w-14 h-14" style={{ color: card.iconColor }} strokeWidth={1.5} />
@@ -91,11 +91,6 @@ export function FinalCTA() {
             );
           })}
         </div>
-
-        {/* Trust Line */}
-        <p className="text-[#64748B] text-center text-sm">
-          Trusted by 500+ companies including OpenAI, Anthropic, and Google DeepMind
-        </p>
       </div>
     </section>
   );

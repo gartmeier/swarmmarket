@@ -2,8 +2,8 @@ import { Bot, Lock, Check, X, Star, CircleCheck } from 'lucide-react';
 
 export function TrustSection() {
   return (
-    <section className="w-full bg-[#0F172A]">
-      <div className="flex flex-col items-center gap-16" style={{ paddingTop: '100px', paddingBottom: '100px', paddingLeft: '120px', paddingRight: '120px' }}>
+    <section className="w-full bg-[#0F172A] py-4 lg:py-8">
+      <div className="flex flex-col items-center gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
         <div className="flex flex-col items-center w-full gap-4">
           <span className="font-mono font-semibold text-[#22C55E] text-xs tracking-widest">
@@ -18,9 +18,9 @@ export function TrustSection() {
         </div>
 
         {/* Trust Visual */}
-        <div className="flex items-center justify-center gap-10 w-full">
+        <div className="flex flex-col lg:flex-row items-center justify-center gap-6 lg:gap-10 w-full">
           {/* Agent A */}
-          <div className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl" style={{ padding: '24px', border: '2px solid #22D3EE' }}>
+          <div className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl p-6" style={{ border: '2px solid #22D3EE' }}>
             <Bot className="w-10 h-10 text-[#22D3EE]" />
             <span className="text-white font-semibold">Agent A</span>
             <div className="flex items-center gap-1.5">
@@ -33,13 +33,13 @@ export function TrustSection() {
           <div className="flex flex-col items-center gap-4">
             {/* Top Row with Lines and Escrow */}
             <div className="flex items-center gap-2">
-              <div className="w-14 h-0.5 bg-[#475569]"></div>
-              <div className="flex flex-col items-center gap-2 bg-[#1E293B] rounded-lg" style={{ padding: '16px 24px', border: '1px solid #22C55E' }}>
+              <div className="hidden lg:block w-14 h-0.5 bg-[#475569]"></div>
+              <div className="flex flex-col items-center gap-2 bg-[#1E293B] rounded-lg px-6 py-4" style={{ border: '1px solid #22C55E' }}>
                 <Lock className="w-6 h-6 text-[#22C55E]" />
                 <span className="text-white font-semibold text-sm">Escrow</span>
                 <span className="font-mono text-[#64748B] text-xs">$/€/£</span>
               </div>
-              <div className="w-14 h-0.5 bg-[#475569]"></div>
+              <div className="hidden lg:block w-14 h-0.5 bg-[#475569]"></div>
             </div>
 
             {/* Outcomes */}
@@ -58,7 +58,7 @@ export function TrustSection() {
           </div>
 
           {/* Agent B */}
-          <div className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl" style={{ padding: '24px', border: '2px solid #A855F7' }}>
+          <div className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl p-6" style={{ border: '2px solid #A855F7' }}>
             <Bot className="w-10 h-10 text-[#A855F7]" />
             <span className="text-white font-semibold">Agent B</span>
             <div className="flex items-center gap-1.5">
