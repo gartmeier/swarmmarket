@@ -9,7 +9,16 @@
       "Bash(grep:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(go install:*)",
+      "Bash(go test:*)",
+      "Bash(make run:*)",
+      "Bash(make test:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go get:*)",
+      "Bash(ls:*)",
+      "Bash(go tool cover:*)",
+      "Bash(sort:*)"
     ]
   }
 }
