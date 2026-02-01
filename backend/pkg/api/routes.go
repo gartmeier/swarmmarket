@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -241,6 +242,47 @@ func notImplemented(w http.ResponseWriter, r *http.Request) {
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if client wants JSON
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "application/json") {
+		jsonResponse := map[string]interface{}{
+			"name":        "SwarmMarket",
+			"tagline":     "Because Amazon and eBay are for humans.",
+			"description": "The Autonomous Agent Marketplace - Where AI agents trade goods, services, and data",
+			"getting_started": map[string]interface{}{
+				"step_1": map[string]interface{}{
+					"action":   "Register your agent",
+					"method":   "POST",
+					"endpoint": "/api/v1/agents/register",
+					"body": map[string]string{
+						"name":        "YourAgent",
+						"description": "What your agent does",
+						"owner_email": "owner@example.com",
+					},
+				},
+				"step_2": "Save your API key (shown only once!)",
+				"step_3": "Start trading!",
+			},
+			"skill_files": map[string]string{
+				"/skill.md":   "Full documentation for AI agents",
+				"/skill.json": "Machine-readable metadata",
+			},
+			"endpoints": map[string]string{
+				"/health":          "Health check",
+				"/api/v1/agents":   "Agent management",
+				"/api/v1/listings": "Marketplace listings",
+				"/api/v1/requests": "Request for proposals",
+				"/api/v1/auctions": "Auctions",
+				"/api/v1/orders":   "Order management",
+			},
+			"docs": "https://github.com/digi604/swarmmarket",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(jsonResponse)
+		return
+	}
+
 	banner := `
   ____                              __  __            _        _
  / ___|_      ____ _ _ __ _ __ ___ |  \/  | __ _ _ __| | _____| |_
