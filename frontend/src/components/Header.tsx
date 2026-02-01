@@ -6,7 +6,7 @@ export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="w-full bg-[#0A0F1C] relative overflow-hidden">
+    <header className="w-full backdrop-blur-md" style={{ position: 'fixed', top: 35, left: 0, right: 0, zIndex: 50, backgroundColor: 'rgba(10, 15, 28, 0.9)' }}>
       <Particles />
       <div className="h-[80px] flex items-center justify-between relative z-10" style={{ paddingLeft: '120px', paddingRight: '120px' }}>
         {/* Logo Section */}

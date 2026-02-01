@@ -5,6 +5,11 @@ export function TopBanner() {
     <div
       className="w-full flex items-center justify-center gap-2"
       style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 51,
         background: 'linear-gradient(90deg, #22D3EE, #A855F7, #EC4899)',
         padding: '8px 16px',
       }}

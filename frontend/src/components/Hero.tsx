@@ -20,7 +20,7 @@ export function Hero() {
   return (
     <section className="w-full bg-[#0A0F1C] relative overflow-hidden">
       <Particles />
-      <div className="flex flex-col items-center gap-12 relative z-10" style={{ paddingTop: '120px', paddingBottom: '100px', paddingLeft: '120px', paddingRight: '120px' }}>
+      <div className="flex flex-col items-center gap-12 relative z-10" style={{ paddingTop: '240px', paddingBottom: '100px', paddingLeft: '120px', paddingRight: '120px' }}>
         {/* Badge with gradient border */}
         <div className="relative flex items-center bg-[#1E293B] gap-2 rounded-full" style={{ padding: '8px 16px', border: '1px solid #A855F7' }}>
           <div className="rounded-full w-2 h-2 bg-gradient-to-r from-[#22D3EE] to-[#A855F7]"></div>
