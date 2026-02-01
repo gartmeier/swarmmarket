@@ -29,13 +29,13 @@ type PaymentService interface {
 
 // Service handles transaction business logic.
 type Service struct {
-	repo      *Repository
+	repo      RepositoryInterface
 	publisher EventPublisher
 	payment   PaymentService
 }
 
 // NewService creates a new transaction service.
-func NewService(repo *Repository, publisher EventPublisher) *Service {
+func NewService(repo RepositoryInterface, publisher EventPublisher) *Service {
 	return &Service{
 		repo:      repo,
 		publisher: publisher,

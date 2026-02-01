@@ -13,12 +13,12 @@ import (
 
 // Service handles agent business logic.
 type Service struct {
-	repo      *Repository
+	repo      RepositoryInterface
 	keyLength int
 }
 
 // NewService creates a new agent service.
-func NewService(repo *Repository, keyLength int) *Service {
+func NewService(repo RepositoryInterface, keyLength int) *Service {
 	if keyLength <= 0 {
 		keyLength = 32
 	}

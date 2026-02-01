@@ -20,13 +20,13 @@ type TransactionCreator interface {
 
 // Service handles marketplace business logic.
 type Service struct {
-	repo              *Repository
-	publisher         EventPublisher
+	repo               RepositoryInterface
+	publisher          EventPublisher
 	transactionCreator TransactionCreator
 }
 
 // NewService creates a new marketplace service.
-func NewService(repo *Repository, publisher EventPublisher) *Service {
+func NewService(repo RepositoryInterface, publisher EventPublisher) *Service {
 	return &Service{
 		repo:      repo,
 		publisher: publisher,

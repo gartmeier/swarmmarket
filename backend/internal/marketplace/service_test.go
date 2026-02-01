@@ -11,11 +11,15 @@ import (
 // Test-specific error for validation failures
 var errValidationFailed = errors.New("validation failed")
 
-// mockRepository implements Repository interface for testing
+// mockRepository implements RepositoryInterface for testing
 type mockRepository struct {
-	listings map[uuid.UUID]*Listing
-	requests map[uuid.UUID]*Request
-	offers   map[uuid.UUID]*Offer
+	listings         map[uuid.UUID]*Listing
+	requests         map[uuid.UUID]*Request
+	offers           map[uuid.UUID]*Offer
+	categories       []Category
+	createListingErr error
+	createRequestErr error
+	createOfferErr   error
 }
 
 func newMockRepository() *mockRepository {
@@ -24,6 +28,141 @@ func newMockRepository() *mockRepository {
 		requests: make(map[uuid.UUID]*Request),
 		offers:   make(map[uuid.UUID]*Offer),
 	}
+}
+
+// Verify mockRepository implements RepositoryInterface
+var _ RepositoryInterface = (*mockRepository)(nil)
+
+func (m *mockRepository) CreateListing(ctx context.Context, listing *Listing) error {
+	if m.createListingErr != nil {
+		return m.createListingErr
+	}
+	m.listings[listing.ID] = listing
+	return nil
+}
+
+func (m *mockRepository) GetListingByID(ctx context.Context, id uuid.UUID) (*Listing, error) {
+	listing, ok := m.listings[id]
+	if !ok {
+		return nil, ErrListingNotFound
+	}
+	return listing, nil
+}
+
+func (m *mockRepository) SearchListings(ctx context.Context, params SearchListingsParams) (*ListResult[Listing], error) {
+	var items []Listing
+	for _, l := range m.listings {
+		if params.Status != nil && l.Status != *params.Status {
+			continue
+		}
+		if params.SellerID != nil && l.SellerID != *params.SellerID {
+			continue
+		}
+		items = append(items, *l)
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	return &ListResult[Listing]{
+		Items:  items,
+		Total:  len(items),
+		Limit:  limit,
+		Offset: params.Offset,
+	}, nil
+}
+
+func (m *mockRepository) DeleteListing(ctx context.Context, id uuid.UUID, sellerID uuid.UUID) error {
+	listing, ok := m.listings[id]
+	if !ok || listing.SellerID != sellerID {
+		return ErrListingNotFound
+	}
+	listing.Status = ListingStatusExpired
+	return nil
+}
+
+func (m *mockRepository) CreateRequest(ctx context.Context, req *Request) error {
+	if m.createRequestErr != nil {
+		return m.createRequestErr
+	}
+	m.requests[req.ID] = req
+	return nil
+}
+
+func (m *mockRepository) GetRequestByID(ctx context.Context, id uuid.UUID) (*Request, error) {
+	req, ok := m.requests[id]
+	if !ok {
+		return nil, ErrRequestNotFound
+	}
+	// Count offers for this request
+	for _, o := range m.offers {
+		if o.RequestID == id {
+			req.OfferCount++
+		}
+	}
+	return req, nil
+}
+
+func (m *mockRepository) SearchRequests(ctx context.Context, params SearchRequestsParams) (*ListResult[Request], error) {
+	var items []Request
+	for _, r := range m.requests {
+		if params.Status != nil && r.Status != *params.Status {
+			continue
+		}
+		if params.RequesterID != nil && r.RequesterID != *params.RequesterID {
+			continue
+		}
+		items = append(items, *r)
+	}
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	return &ListResult[Request]{
+		Items:  items,
+		Total:  len(items),
+		Limit:  limit,
+		Offset: params.Offset,
+	}, nil
+}
+
+func (m *mockRepository) CreateOffer(ctx context.Context, offer *Offer) error {
+	if m.createOfferErr != nil {
+		return m.createOfferErr
+	}
+	m.offers[offer.ID] = offer
+	return nil
+}
+
+func (m *mockRepository) GetOfferByID(ctx context.Context, id uuid.UUID) (*Offer, error) {
+	offer, ok := m.offers[id]
+	if !ok {
+		return nil, ErrOfferNotFound
+	}
+	return offer, nil
+}
+
+func (m *mockRepository) GetOffersByRequestID(ctx context.Context, requestID uuid.UUID) ([]Offer, error) {
+	var offers []Offer
+	for _, o := range m.offers {
+		if o.RequestID == requestID {
+			offers = append(offers, *o)
+		}
+	}
+	return offers, nil
+}
+
+func (m *mockRepository) UpdateOfferStatus(ctx context.Context, id uuid.UUID, status OfferStatus) error {
+	offer, ok := m.offers[id]
+	if !ok {
+		return ErrOfferNotFound
+	}
+	offer.Status = status
+	return nil
+}
+
+func (m *mockRepository) GetCategories(ctx context.Context) ([]Category, error) {
+	return m.categories, nil
 }
 
 // mockPublisher implements EventPublisher for testing
@@ -671,5 +810,587 @@ func TestCreateOfferRequestAllFields(t *testing.T) {
 	}
 	if req.DeliveryTerms != "2-3 business days" {
 		t.Error("delivery terms not set correctly")
+	}
+}
+
+// --- Mock Transaction Creator ---
+
+type mockTransactionCreator struct {
+	transactions map[uuid.UUID]struct {
+		buyerID, sellerID uuid.UUID
+		amount            float64
+	}
+	err error
+}
+
+func newMockTransactionCreator() *mockTransactionCreator {
+	return &mockTransactionCreator{
+		transactions: make(map[uuid.UUID]struct {
+			buyerID, sellerID uuid.UUID
+			amount            float64
+		}),
+	}
+}
+
+func (m *mockTransactionCreator) CreateFromOffer(ctx context.Context, buyerID, sellerID uuid.UUID, requestID, offerID *uuid.UUID, amount float64, currency string) (uuid.UUID, error) {
+	if m.err != nil {
+		return uuid.Nil, m.err
+	}
+	txID := uuid.New()
+	m.transactions[txID] = struct {
+		buyerID, sellerID uuid.UUID
+		amount            float64
+	}{buyerID, sellerID, amount}
+	return txID, nil
+}
+
+// --- Service Method Tests ---
+
+func TestService_CreateListing(t *testing.T) {
+	repo := newMockRepository()
+	publisher := &mockPublisher{}
+	service := NewService(repo, publisher)
+
+	sellerID := uuid.New()
+	priceAmount := 100.0
+
+	listing, err := service.CreateListing(context.Background(), sellerID, &CreateListingRequest{
+		Title:       "Test Listing",
+		Description: "A test listing",
+		ListingType: ListingTypeServices,
+		PriceAmount: &priceAmount,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if listing.Title != "Test Listing" {
+		t.Errorf("expected title 'Test Listing', got %s", listing.Title)
+	}
+	if listing.SellerID != sellerID {
+		t.Errorf("expected seller ID %s, got %s", sellerID, listing.SellerID)
+	}
+	if listing.Status != ListingStatusActive {
+		t.Errorf("expected status active, got %s", listing.Status)
+	}
+	if listing.PriceCurrency != "USD" {
+		t.Errorf("expected currency USD, got %s", listing.PriceCurrency)
+	}
+	if listing.GeographicScope != ScopeInternational {
+		t.Errorf("expected scope international, got %s", listing.GeographicScope)
+	}
+}
+
+func TestService_CreateListing_MissingTitle(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.CreateListing(context.Background(), uuid.New(), &CreateListingRequest{
+		ListingType: ListingTypeServices,
+	})
+
+	if err == nil {
+		t.Error("expected error for missing title")
+	}
+}
+
+func TestService_CreateListing_MissingType(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.CreateListing(context.Background(), uuid.New(), &CreateListingRequest{
+		Title: "Test",
+	})
+
+	if err == nil {
+		t.Error("expected error for missing listing type")
+	}
+}
+
+func TestService_GetListing(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	// Create a listing first
+	sellerID := uuid.New()
+	listing, _ := service.CreateListing(context.Background(), sellerID, &CreateListingRequest{
+		Title:       "Test Listing",
+		ListingType: ListingTypeGoods,
+	})
+
+	// Get it back
+	retrieved, err := service.GetListing(context.Background(), listing.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if retrieved.ID != listing.ID {
+		t.Errorf("expected ID %s, got %s", listing.ID, retrieved.ID)
+	}
+}
+
+func TestService_GetListing_NotFound(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.GetListing(context.Background(), uuid.New())
+	if err != ErrListingNotFound {
+		t.Errorf("expected ErrListingNotFound, got %v", err)
+	}
+}
+
+func TestService_SearchListings(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	sellerID := uuid.New()
+
+	// Create some listings
+	for i := 0; i < 5; i++ {
+		service.CreateListing(context.Background(), sellerID, &CreateListingRequest{
+			Title:       "Test Listing",
+			ListingType: ListingTypeServices,
+		})
+	}
+
+	// Search all
+	result, err := service.SearchListings(context.Background(), SearchListingsParams{
+		SellerID: &sellerID,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Total != 5 {
+		t.Errorf("expected 5 listings, got %d", result.Total)
+	}
+}
+
+func TestService_DeleteListing(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	sellerID := uuid.New()
+	listing, _ := service.CreateListing(context.Background(), sellerID, &CreateListingRequest{
+		Title:       "To Delete",
+		ListingType: ListingTypeData,
+	})
+
+	err := service.DeleteListing(context.Background(), listing.ID, sellerID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify status changed
+	updated, _ := repo.GetListingByID(context.Background(), listing.ID)
+	if updated.Status != ListingStatusExpired {
+		t.Errorf("expected status expired, got %s", updated.Status)
+	}
+}
+
+func TestService_DeleteListing_WrongSeller(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	sellerID := uuid.New()
+	listing, _ := service.CreateListing(context.Background(), sellerID, &CreateListingRequest{
+		Title:       "To Delete",
+		ListingType: ListingTypeData,
+	})
+
+	err := service.DeleteListing(context.Background(), listing.ID, uuid.New()) // Different seller
+	if err != ErrListingNotFound {
+		t.Errorf("expected ErrListingNotFound, got %v", err)
+	}
+}
+
+func TestService_CreateRequest(t *testing.T) {
+	repo := newMockRepository()
+	publisher := &mockPublisher{}
+	service := NewService(repo, publisher)
+
+	requesterID := uuid.New()
+	budgetMin := 50.0
+	budgetMax := 200.0
+
+	request, err := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		Description: "I need help with something",
+		RequestType: ListingTypeServices,
+		BudgetMin:   &budgetMin,
+		BudgetMax:   &budgetMax,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if request.Title != "Need Help" {
+		t.Errorf("expected title 'Need Help', got %s", request.Title)
+	}
+	if request.RequesterID != requesterID {
+		t.Errorf("expected requester ID %s, got %s", requesterID, request.RequesterID)
+	}
+	if request.Status != RequestStatusOpen {
+		t.Errorf("expected status open, got %s", request.Status)
+	}
+}
+
+func TestService_CreateRequest_MissingTitle(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.CreateRequest(context.Background(), uuid.New(), &CreateRequestRequest{
+		RequestType: ListingTypeServices,
+	})
+
+	if err == nil {
+		t.Error("expected error for missing title")
+	}
+}
+
+func TestService_CreateRequest_MissingType(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.CreateRequest(context.Background(), uuid.New(), &CreateRequestRequest{
+		Title: "Test",
+	})
+
+	if err == nil {
+		t.Error("expected error for missing request type")
+	}
+}
+
+func TestService_GetRequest(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Test Request",
+		RequestType: ListingTypeData,
+	})
+
+	retrieved, err := service.GetRequest(context.Background(), request.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if retrieved.ID != request.ID {
+		t.Errorf("expected ID %s, got %s", request.ID, retrieved.ID)
+	}
+}
+
+func TestService_GetRequest_NotFound(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.GetRequest(context.Background(), uuid.New())
+	if err != ErrRequestNotFound {
+		t.Errorf("expected ErrRequestNotFound, got %v", err)
+	}
+}
+
+func TestService_SearchRequests(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+
+	// Create some requests
+	for i := 0; i < 3; i++ {
+		service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+			Title:       "Test Request",
+			RequestType: ListingTypeServices,
+		})
+	}
+
+	result, err := service.SearchRequests(context.Background(), SearchRequestsParams{
+		RequesterID: &requesterID,
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Total != 3 {
+		t.Errorf("expected 3 requests, got %d", result.Total)
+	}
+}
+
+func TestService_SubmitOffer(t *testing.T) {
+	repo := newMockRepository()
+	publisher := &mockPublisher{}
+	service := NewService(repo, publisher)
+
+	requesterID := uuid.New()
+	offererID := uuid.New()
+
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	offer, err := service.SubmitOffer(context.Background(), offererID, request.ID, &CreateOfferRequest{
+		PriceAmount:   100.0,
+		Description:   "I can help",
+		DeliveryTerms: "2 days",
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if offer.OffererID != offererID {
+		t.Errorf("expected offerer ID %s, got %s", offererID, offer.OffererID)
+	}
+	if offer.RequestID != request.ID {
+		t.Errorf("expected request ID %s, got %s", request.ID, offer.RequestID)
+	}
+	if offer.Status != OfferStatusPending {
+		t.Errorf("expected status pending, got %s", offer.Status)
+	}
+	if offer.PriceCurrency != "USD" {
+		t.Errorf("expected currency USD, got %s", offer.PriceCurrency)
+	}
+}
+
+func TestService_SubmitOffer_RequestNotFound(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	_, err := service.SubmitOffer(context.Background(), uuid.New(), uuid.New(), &CreateOfferRequest{
+		PriceAmount: 100.0,
+	})
+
+	if err != ErrRequestNotFound {
+		t.Errorf("expected ErrRequestNotFound, got %v", err)
+	}
+}
+
+func TestService_SubmitOffer_SelfOffer(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	_, err := service.SubmitOffer(context.Background(), requesterID, request.ID, &CreateOfferRequest{
+		PriceAmount: 100.0,
+	})
+
+	if err == nil {
+		t.Error("expected error for self-offer")
+	}
+}
+
+func TestService_SubmitOffer_InvalidPrice(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+	offererID := uuid.New()
+
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	tests := []float64{0, -50, -0.01}
+	for _, price := range tests {
+		_, err := service.SubmitOffer(context.Background(), offererID, request.ID, &CreateOfferRequest{
+			PriceAmount: price,
+		})
+		if err == nil {
+			t.Errorf("expected error for price %f", price)
+		}
+	}
+}
+
+func TestService_GetOffersByRequest(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	// Submit some offers
+	for i := 0; i < 3; i++ {
+		service.SubmitOffer(context.Background(), uuid.New(), request.ID, &CreateOfferRequest{
+			PriceAmount: float64(100 * (i + 1)),
+		})
+	}
+
+	offers, err := service.GetOffersByRequest(context.Background(), request.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(offers) != 3 {
+		t.Errorf("expected 3 offers, got %d", len(offers))
+	}
+}
+
+func TestService_AcceptOffer(t *testing.T) {
+	repo := newMockRepository()
+	publisher := &mockPublisher{}
+	txCreator := newMockTransactionCreator()
+	service := NewService(repo, publisher)
+	service.SetTransactionCreator(txCreator)
+
+	requesterID := uuid.New()
+	offererID := uuid.New()
+
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	offer, _ := service.SubmitOffer(context.Background(), offererID, request.ID, &CreateOfferRequest{
+		PriceAmount: 100.0,
+	})
+
+	accepted, err := service.AcceptOffer(context.Background(), requesterID, offer.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if accepted.Status != OfferStatusAccepted {
+		t.Errorf("expected status accepted, got %s", accepted.Status)
+	}
+
+	// Verify transaction was created
+	if len(txCreator.transactions) != 1 {
+		t.Errorf("expected 1 transaction, got %d", len(txCreator.transactions))
+	}
+}
+
+func TestService_AcceptOffer_NotRequester(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+	offererID := uuid.New()
+
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	offer, _ := service.SubmitOffer(context.Background(), offererID, request.ID, &CreateOfferRequest{
+		PriceAmount: 100.0,
+	})
+
+	_, err := service.AcceptOffer(context.Background(), uuid.New(), offer.ID) // Different user
+	if err == nil {
+		t.Error("expected error for non-requester accepting")
+	}
+}
+
+func TestService_AcceptOffer_NotPending(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, nil)
+
+	requesterID := uuid.New()
+	offererID := uuid.New()
+
+	request, _ := service.CreateRequest(context.Background(), requesterID, &CreateRequestRequest{
+		Title:       "Need Help",
+		RequestType: ListingTypeServices,
+	})
+
+	offer, _ := service.SubmitOffer(context.Background(), offererID, request.ID, &CreateOfferRequest{
+		PriceAmount: 100.0,
+	})
+
+	// Accept once
+	service.AcceptOffer(context.Background(), requesterID, offer.ID)
+
+	// Try to accept again
+	_, err := service.AcceptOffer(context.Background(), requesterID, offer.ID)
+	if err == nil {
+		t.Error("expected error for non-pending offer")
+	}
+}
+
+func TestService_GetCategories(t *testing.T) {
+	repo := newMockRepository()
+	repo.categories = []Category{
+		{ID: uuid.New(), Name: "Services", Slug: "services"},
+		{ID: uuid.New(), Name: "Data", Slug: "data"},
+	}
+	service := NewService(repo, nil)
+
+	categories, err := service.GetCategories(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(categories) != 2 {
+		t.Errorf("expected 2 categories, got %d", len(categories))
+	}
+}
+
+func TestNewService(t *testing.T) {
+	repo := newMockRepository()
+	publisher := &mockPublisher{}
+	service := NewService(repo, publisher)
+
+	if service == nil {
+		t.Fatal("expected service to be created")
+	}
+	if service.publisher != publisher {
+		t.Error("publisher not set correctly")
+	}
+	if service.transactionCreator != nil {
+		t.Error("transaction creator should be nil initially")
+	}
+}
+
+func TestSetTransactionCreator(t *testing.T) {
+	service := NewService(newMockRepository(), nil)
+	txCreator := newMockTransactionCreator()
+
+	service.SetTransactionCreator(txCreator)
+
+	if service.transactionCreator == nil {
+		t.Error("transaction creator should be set")
+	}
+}
+
+func TestDefaultHelpers(t *testing.T) {
+	// Test defaultString
+	if defaultString("", "default") != "default" {
+		t.Error("defaultString should return default for empty string")
+	}
+	if defaultString("value", "default") != "value" {
+		t.Error("defaultString should return value when not empty")
+	}
+
+	// Test defaultInt
+	if defaultInt(0, 10) != 10 {
+		t.Error("defaultInt should return default for zero")
+	}
+	if defaultInt(5, 10) != 5 {
+		t.Error("defaultInt should return value when not zero")
+	}
+
+	// Test defaultScope
+	if defaultScope("", ScopeLocal) != ScopeLocal {
+		t.Error("defaultScope should return default for empty")
+	}
+	if defaultScope(ScopeNational, ScopeLocal) != ScopeNational {
+		t.Error("defaultScope should return value when not empty")
+	}
+}
+
+func TestRepositoryErrors(t *testing.T) {
+	if ErrListingNotFound.Error() != "listing not found" {
+		t.Errorf("unexpected error message: %s", ErrListingNotFound.Error())
+	}
+	if ErrRequestNotFound.Error() != "request not found" {
+		t.Errorf("unexpected error message: %s", ErrRequestNotFound.Error())
+	}
+	if ErrOfferNotFound.Error() != "offer not found" {
+		t.Errorf("unexpected error message: %s", ErrOfferNotFound.Error())
 	}
 }

@@ -24,12 +24,12 @@ type EventPublisher interface {
 
 // Service handles auction business logic.
 type Service struct {
-	repo      *Repository
+	repo      RepositoryInterface
 	publisher EventPublisher
 }
 
 // NewService creates a new auction service.
-func NewService(repo *Repository, publisher EventPublisher) *Service {
+func NewService(repo RepositoryInterface, publisher EventPublisher) *Service {
 	return &Service{
 		repo:      repo,
 		publisher: publisher,

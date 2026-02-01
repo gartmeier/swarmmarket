@@ -1,12 +1,152 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// mockRepository implements RepositoryInterface for testing.
+type mockRepository struct {
+	agents          map[uuid.UUID]*Agent
+	agentsByHash    map[string]*Agent
+	ownershipTokens map[string]*OwnershipToken
+	agentsByOwner   map[uuid.UUID][]*Agent
+	createErr       error
+	getByIDErr      error
+	updateErr       error
+}
+
+func newMockRepository() *mockRepository {
+	return &mockRepository{
+		agents:          make(map[uuid.UUID]*Agent),
+		agentsByHash:    make(map[string]*Agent),
+		ownershipTokens: make(map[string]*OwnershipToken),
+		agentsByOwner:   make(map[uuid.UUID][]*Agent),
+	}
+}
+
+func (m *mockRepository) Create(ctx context.Context, agent *Agent) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.agents[agent.ID] = agent
+	m.agentsByHash[agent.APIKeyHash] = agent
+	return nil
+}
+
+func (m *mockRepository) GetByID(ctx context.Context, id uuid.UUID) (*Agent, error) {
+	if m.getByIDErr != nil {
+		return nil, m.getByIDErr
+	}
+	if agent, ok := m.agents[id]; ok {
+		return agent, nil
+	}
+	return nil, ErrAgentNotFound
+}
+
+func (m *mockRepository) GetByAPIKeyHash(ctx context.Context, hash string) (*Agent, error) {
+	if agent, ok := m.agentsByHash[hash]; ok {
+		return agent, nil
+	}
+	return nil, ErrAgentNotFound
+}
+
+func (m *mockRepository) Update(ctx context.Context, agent *Agent) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	if _, ok := m.agents[agent.ID]; !ok {
+		return ErrAgentNotFound
+	}
+	m.agents[agent.ID] = agent
+	return nil
+}
+
+func (m *mockRepository) UpdateLastSeen(ctx context.Context, id uuid.UUID) error {
+	if agent, ok := m.agents[id]; ok {
+		now := time.Now()
+		agent.LastSeenAt = &now
+		return nil
+	}
+	return ErrAgentNotFound
+}
+
+func (m *mockRepository) Deactivate(ctx context.Context, id uuid.UUID) error {
+	if agent, ok := m.agents[id]; ok {
+		agent.IsActive = false
+		return nil
+	}
+	return ErrAgentNotFound
+}
+
+func (m *mockRepository) GetReputation(ctx context.Context, agentID uuid.UUID) (*Reputation, error) {
+	agent, err := m.GetByID(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	return &Reputation{
+		AgentID:           agent.ID,
+		TrustScore:        agent.TrustScore,
+		TotalTransactions: agent.TotalTransactions,
+		SuccessfulTrades:  agent.SuccessfulTrades,
+		AverageRating:     agent.AverageRating,
+	}, nil
+}
+
+func (m *mockRepository) CreateOwnershipToken(ctx context.Context, agentID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+	m.ownershipTokens[tokenHash] = &OwnershipToken{
+		ID:        uuid.New(),
+		AgentID:   agentID,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	}
+	return nil
+}
+
+func (m *mockRepository) GetOwnershipTokenByHash(ctx context.Context, tokenHash string) (*OwnershipToken, error) {
+	if token, ok := m.ownershipTokens[tokenHash]; ok {
+		return token, nil
+	}
+	return nil, ErrTokenNotFound
+}
+
+func (m *mockRepository) MarkTokenUsed(ctx context.Context, tokenID, userID uuid.UUID) error {
+	for _, token := range m.ownershipTokens {
+		if token.ID == tokenID {
+			now := time.Now()
+			token.UsedAt = &now
+			token.UsedByUserID = &userID
+			return nil
+		}
+	}
+	return ErrTokenNotFound
+}
+
+func (m *mockRepository) SetAgentOwner(ctx context.Context, agentID, userID uuid.UUID) error {
+	if agent, ok := m.agents[agentID]; ok {
+		agent.OwnerUserID = &userID
+		agent.TrustScore = 1.0
+		m.agentsByOwner[userID] = append(m.agentsByOwner[userID], agent)
+		return nil
+	}
+	return ErrAgentNotFound
+}
+
+func (m *mockRepository) GetAgentOwnerID(ctx context.Context, agentID uuid.UUID) (*uuid.UUID, error) {
+	if agent, ok := m.agents[agentID]; ok {
+		return agent.OwnerUserID, nil
+	}
+	return nil, ErrAgentNotFound
+}
+
+func (m *mockRepository) GetAgentsByOwner(ctx context.Context, userID uuid.UUID) ([]*Agent, error) {
+	return m.agentsByOwner[userID], nil
+}
 
 func TestGenerateAPIKey(t *testing.T) {
 	s := NewService(nil, 32)
@@ -364,5 +504,445 @@ func TestAgentPublicProfile_AllFields(t *testing.T) {
 	}
 	if !profile.CreatedAt.Equal(agent.CreatedAt) {
 		t.Error("CreatedAt not copied correctly")
+	}
+}
+
+// Service-level tests using mock repository
+
+func TestService_Register(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+
+	ctx := context.Background()
+	req := &RegisterRequest{
+		Name:        "Test Agent",
+		Description: "A test agent",
+		OwnerEmail:  "test@example.com",
+		Metadata:    map[string]any{"version": "1.0"},
+	}
+
+	resp, err := service.Register(ctx, req)
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	if resp.Agent == nil {
+		t.Fatal("Agent should not be nil")
+	}
+	if resp.APIKey == "" {
+		t.Error("APIKey should not be empty")
+	}
+	if !strings.HasPrefix(resp.APIKey, "sm_") {
+		t.Error("APIKey should have sm_ prefix")
+	}
+	if resp.Agent.Name != "Test Agent" {
+		t.Errorf("expected name 'Test Agent', got %s", resp.Agent.Name)
+	}
+	if resp.Agent.VerificationLevel != VerificationBasic {
+		t.Error("new agents should have basic verification")
+	}
+	if resp.Agent.TrustScore != 0.5 {
+		t.Error("new agents should have trust score 0.5")
+	}
+	if !resp.Agent.IsActive {
+		t.Error("new agents should be active")
+	}
+
+	// Verify agent was stored
+	stored, err := repo.GetByID(ctx, resp.Agent.ID)
+	if err != nil {
+		t.Fatalf("Agent not stored: %v", err)
+	}
+	if stored.Name != "Test Agent" {
+		t.Error("stored agent has wrong name")
+	}
+}
+
+func TestService_GetByID(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	// Create an agent first
+	agentID := uuid.New()
+	agent := &Agent{
+		ID:        agentID,
+		Name:      "Test Agent",
+		IsActive:  true,
+		CreatedAt: time.Now(),
+	}
+	repo.agents[agentID] = agent
+
+	// Get by ID
+	result, err := service.GetByID(ctx, agentID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if result.ID != agentID {
+		t.Error("returned wrong agent")
+	}
+
+	// Get non-existent
+	_, err = service.GetByID(ctx, uuid.New())
+	if err != ErrAgentNotFound {
+		t.Error("expected ErrAgentNotFound for non-existent agent")
+	}
+}
+
+func TestService_GetPublicProfile(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agentID := uuid.New()
+	agent := &Agent{
+		ID:                agentID,
+		Name:              "Public Agent",
+		Description:       "Description",
+		OwnerEmail:        "secret@example.com",
+		APIKeyHash:        "secret_hash",
+		VerificationLevel: VerificationVerified,
+		TrustScore:        0.9,
+		IsActive:          true,
+		CreatedAt:         time.Now(),
+	}
+	repo.agents[agentID] = agent
+
+	profile, err := service.GetPublicProfile(ctx, agentID)
+	if err != nil {
+		t.Fatalf("GetPublicProfile failed: %v", err)
+	}
+
+	if profile.Name != "Public Agent" {
+		t.Error("profile name incorrect")
+	}
+	if profile.TrustScore != 0.9 {
+		t.Error("profile trust score incorrect")
+	}
+}
+
+func TestService_ValidateAPIKey(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	// Register an agent to get a valid API key
+	resp, err := service.Register(ctx, &RegisterRequest{
+		Name:       "API Key Agent",
+		OwnerEmail: "test@example.com",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	// Validate the API key
+	agent, err := service.ValidateAPIKey(ctx, resp.APIKey)
+	if err != nil {
+		t.Fatalf("ValidateAPIKey failed: %v", err)
+	}
+	if agent.ID != resp.Agent.ID {
+		t.Error("returned wrong agent")
+	}
+
+	// Validate invalid key
+	_, err = service.ValidateAPIKey(ctx, "sm_invalid_key")
+	if err != ErrAgentNotFound {
+		t.Error("expected ErrAgentNotFound for invalid key")
+	}
+}
+
+func TestService_Update(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	// Create agent
+	agentID := uuid.New()
+	agent := &Agent{
+		ID:        agentID,
+		Name:      "Original Name",
+		IsActive:  true,
+		CreatedAt: time.Now(),
+	}
+	repo.agents[agentID] = agent
+
+	// Update
+	newName := "Updated Name"
+	newDesc := "New description"
+	updated, err := service.Update(ctx, agentID, &UpdateRequest{
+		Name:        &newName,
+		Description: &newDesc,
+		Metadata:    map[string]any{"updated": true},
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	if updated.Name != "Updated Name" {
+		t.Errorf("expected name 'Updated Name', got %s", updated.Name)
+	}
+	if updated.Description != "New description" {
+		t.Error("description not updated")
+	}
+	if updated.Metadata["updated"] != true {
+		t.Error("metadata not updated")
+	}
+}
+
+func TestService_Update_NotFound(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	name := "New Name"
+	_, err := service.Update(ctx, uuid.New(), &UpdateRequest{Name: &name})
+	if err != ErrAgentNotFound {
+		t.Error("expected ErrAgentNotFound")
+	}
+}
+
+func TestService_Deactivate(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agentID := uuid.New()
+	agent := &Agent{
+		ID:       agentID,
+		Name:     "To Deactivate",
+		IsActive: true,
+	}
+	repo.agents[agentID] = agent
+
+	err := service.Deactivate(ctx, agentID)
+	if err != nil {
+		t.Fatalf("Deactivate failed: %v", err)
+	}
+
+	// Verify deactivated
+	if repo.agents[agentID].IsActive {
+		t.Error("agent should be deactivated")
+	}
+}
+
+func TestService_GetReputation(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agentID := uuid.New()
+	agent := &Agent{
+		ID:                agentID,
+		Name:              "Reputable Agent",
+		TrustScore:        0.95,
+		TotalTransactions: 100,
+		SuccessfulTrades:  98,
+		AverageRating:     4.8,
+		IsActive:          true,
+	}
+	repo.agents[agentID] = agent
+
+	rep, err := service.GetReputation(ctx, agentID)
+	if err != nil {
+		t.Fatalf("GetReputation failed: %v", err)
+	}
+
+	if rep.TrustScore != 0.95 {
+		t.Errorf("expected trust score 0.95, got %f", rep.TrustScore)
+	}
+	if rep.TotalTransactions != 100 {
+		t.Error("total transactions incorrect")
+	}
+	if rep.SuccessfulTrades != 98 {
+		t.Error("successful trades incorrect")
+	}
+}
+
+func TestService_GenerateOwnershipToken(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agentID := uuid.New()
+	agent := &Agent{ID: agentID, Name: "Token Agent", IsActive: true}
+	repo.agents[agentID] = agent
+
+	token, expiresAt, err := service.GenerateOwnershipToken(ctx, agentID)
+	if err != nil {
+		t.Fatalf("GenerateOwnershipToken failed: %v", err)
+	}
+
+	if !strings.HasPrefix(token, "own_") {
+		t.Error("token should have own_ prefix")
+	}
+	if expiresAt.Before(time.Now()) {
+		t.Error("expiry should be in the future")
+	}
+
+	// Verify token was stored
+	if len(repo.ownershipTokens) != 1 {
+		t.Error("token should be stored")
+	}
+}
+
+func TestService_GenerateOwnershipToken_NotFound(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	_, _, err := service.GenerateOwnershipToken(ctx, uuid.New())
+	if err != ErrAgentNotFound {
+		t.Error("expected ErrAgentNotFound")
+	}
+}
+
+func TestService_ClaimOwnership(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	// Create agent
+	agentID := uuid.New()
+	agent := &Agent{ID: agentID, Name: "Claimable Agent", IsActive: true, TrustScore: 0.5}
+	repo.agents[agentID] = agent
+
+	// Generate token
+	token, _, err := service.GenerateOwnershipToken(ctx, agentID)
+	if err != nil {
+		t.Fatalf("GenerateOwnershipToken failed: %v", err)
+	}
+
+	// Claim ownership
+	userID := uuid.New()
+	claimed, err := service.ClaimOwnership(ctx, userID, token)
+	if err != nil {
+		t.Fatalf("ClaimOwnership failed: %v", err)
+	}
+
+	if claimed.OwnerUserID == nil || *claimed.OwnerUserID != userID {
+		t.Error("owner not set correctly")
+	}
+	if claimed.TrustScore != 1.0 {
+		t.Error("trust score should be boosted to 1.0")
+	}
+}
+
+func TestService_ClaimOwnership_ExpiredToken(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agentID := uuid.New()
+	agent := &Agent{ID: agentID, Name: "Agent", IsActive: true}
+	repo.agents[agentID] = agent
+
+	// Create expired token directly
+	tokenHash := service.hashToken("own_test_expired")
+	repo.ownershipTokens[tokenHash] = &OwnershipToken{
+		ID:        uuid.New(),
+		AgentID:   agentID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(-1 * time.Hour), // Expired
+		CreatedAt: time.Now().Add(-25 * time.Hour),
+	}
+
+	_, err := service.ClaimOwnership(ctx, uuid.New(), "own_test_expired")
+	if err != ErrTokenExpired {
+		t.Errorf("expected ErrTokenExpired, got %v", err)
+	}
+}
+
+func TestService_ClaimOwnership_UsedToken(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agentID := uuid.New()
+	agent := &Agent{ID: agentID, Name: "Agent", IsActive: true}
+	repo.agents[agentID] = agent
+
+	// Create already used token
+	tokenHash := service.hashToken("own_test_used")
+	usedAt := time.Now().Add(-1 * time.Hour)
+	usedBy := uuid.New()
+	repo.ownershipTokens[tokenHash] = &OwnershipToken{
+		ID:           uuid.New(),
+		AgentID:      agentID,
+		TokenHash:    tokenHash,
+		ExpiresAt:    time.Now().Add(24 * time.Hour),
+		UsedAt:       &usedAt,
+		UsedByUserID: &usedBy,
+		CreatedAt:    time.Now().Add(-1 * time.Hour),
+	}
+
+	_, err := service.ClaimOwnership(ctx, uuid.New(), "own_test_used")
+	if err != ErrTokenAlreadyUsed {
+		t.Errorf("expected ErrTokenAlreadyUsed, got %v", err)
+	}
+}
+
+func TestService_ClaimOwnership_AlreadyOwned(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	// Create agent with existing owner
+	agentID := uuid.New()
+	existingOwner := uuid.New()
+	agent := &Agent{ID: agentID, Name: "Owned Agent", IsActive: true, OwnerUserID: &existingOwner}
+	repo.agents[agentID] = agent
+
+	// Create valid token
+	tokenHash := service.hashToken("own_test_valid")
+	repo.ownershipTokens[tokenHash] = &OwnershipToken{
+		ID:        uuid.New(),
+		AgentID:   agentID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		CreatedAt: time.Now(),
+	}
+
+	_, err := service.ClaimOwnership(ctx, uuid.New(), "own_test_valid")
+	if err != ErrAgentAlreadyOwned {
+		t.Errorf("expected ErrAgentAlreadyOwned, got %v", err)
+	}
+}
+
+func TestService_GetAgentsByOwner(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	userID := uuid.New()
+
+	// Create agents owned by user
+	agent1 := &Agent{ID: uuid.New(), Name: "Agent 1", OwnerUserID: &userID}
+	agent2 := &Agent{ID: uuid.New(), Name: "Agent 2", OwnerUserID: &userID}
+	repo.agents[agent1.ID] = agent1
+	repo.agents[agent2.ID] = agent2
+	repo.agentsByOwner[userID] = []*Agent{agent1, agent2}
+
+	agents, err := service.GetAgentsByOwner(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetAgentsByOwner failed: %v", err)
+	}
+
+	if len(agents) != 2 {
+		t.Errorf("expected 2 agents, got %d", len(agents))
+	}
+}
+
+func TestService_GetAgentsByOwner_Empty(t *testing.T) {
+	repo := newMockRepository()
+	service := NewService(repo, 32)
+	ctx := context.Background()
+
+	agents, err := service.GetAgentsByOwner(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("GetAgentsByOwner failed: %v", err)
+	}
+
+	if len(agents) != 0 {
+		t.Error("expected empty list for user with no agents")
 	}
 }
