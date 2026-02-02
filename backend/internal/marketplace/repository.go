@@ -70,7 +70,7 @@ func (r *Repository) CreateListing(ctx context.Context, listing *Listing) error 
 // GetListingByID retrieves a listing by ID.
 func (r *Repository) GetListingByID(ctx context.Context, id uuid.UUID) (*Listing, error) {
 	query := `
-		SELECT l.id, l.slug, l.seller_id, l.category_id, l.title, l.description, l.listing_type,
+		SELECT l.id, COALESCE(l.slug, ''), l.seller_id, l.category_id, l.title, l.description, l.listing_type,
 			l.price_amount, l.price_currency, l.quantity, l.geographic_scope,
 			l.location_lat, l.location_lng, l.location_radius_km, l.status,
 			l.expires_at, l.metadata, l.created_at, l.updated_at,
@@ -111,7 +111,7 @@ func (r *Repository) GetListingBySlug(ctx context.Context, slug string) (*Listin
 	}
 
 	query := `
-		SELECT l.id, l.slug, l.seller_id, l.category_id, l.title, l.description, l.listing_type,
+		SELECT l.id, COALESCE(l.slug, ''), l.seller_id, l.category_id, l.title, l.description, l.listing_type,
 			l.price_amount, l.price_currency, l.quantity, l.geographic_scope,
 			l.location_lat, l.location_lng, l.location_radius_km, l.status,
 			l.expires_at, l.metadata, l.created_at, l.updated_at,
@@ -215,7 +215,7 @@ func (r *Repository) SearchListings(ctx context.Context, params SearchListingsPa
 	}
 
 	query := fmt.Sprintf(`
-		SELECT l.id, l.slug, l.seller_id, l.category_id, l.title, l.description, l.listing_type,
+		SELECT l.id, COALESCE(l.slug, ''), l.seller_id, l.category_id, l.title, l.description, l.listing_type,
 			l.price_amount, l.price_currency, l.quantity, l.geographic_scope,
 			l.location_lat, l.location_lng, l.location_radius_km, l.status,
 			l.expires_at, l.metadata, l.created_at, l.updated_at,
@@ -304,7 +304,7 @@ func (r *Repository) CreateRequest(ctx context.Context, req *Request) error {
 // GetRequestByID retrieves a request by ID.
 func (r *Repository) GetRequestByID(ctx context.Context, id uuid.UUID) (*Request, error) {
 	query := `
-		SELECT r.id, r.slug, r.requester_id, r.category_id, r.title, r.description,
+		SELECT r.id, COALESCE(r.slug, ''), r.requester_id, r.category_id, r.title, r.description,
 			r.request_type, r.budget_min, r.budget_max, r.budget_currency,
 			r.quantity, r.geographic_scope, r.location_lat, r.location_lng,
 			r.location_radius_km, r.status, r.expires_at, r.metadata,
@@ -344,7 +344,7 @@ func (r *Repository) GetRequestBySlug(ctx context.Context, slug string) (*Reques
 	}
 
 	query := `
-		SELECT r.id, r.slug, r.requester_id, r.category_id, r.title, r.description,
+		SELECT r.id, COALESCE(r.slug, ''), r.requester_id, r.category_id, r.title, r.description,
 			r.request_type, r.budget_min, r.budget_max, r.budget_currency,
 			r.quantity, r.geographic_scope, r.location_lat, r.location_lng,
 			r.location_radius_km, r.status, r.expires_at, r.metadata,
@@ -447,7 +447,7 @@ func (r *Repository) SearchRequests(ctx context.Context, params SearchRequestsPa
 	}
 
 	query := fmt.Sprintf(`
-		SELECT r.id, r.slug, r.requester_id, r.category_id, r.title, r.description,
+		SELECT r.id, COALESCE(r.slug, ''), r.requester_id, r.category_id, r.title, r.description,
 			r.request_type, r.budget_min, r.budget_max, r.budget_currency,
 			r.quantity, r.geographic_scope, r.location_lat, r.location_lng,
 			r.location_radius_km, r.status, r.expires_at, r.metadata,

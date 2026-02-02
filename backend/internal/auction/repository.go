@@ -88,7 +88,7 @@ func (r *Repository) CreateAuction(ctx context.Context, auction *Auction) error 
 func (r *Repository) GetAuctionByID(ctx context.Context, id uuid.UUID) (*Auction, error) {
 	query := `
 		SELECT
-			a.id, a.slug, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
+			a.id, COALESCE(a.slug, ''), a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
 			a.starting_price, a.current_price, a.reserve_price, a.buy_now_price, a.price_currency,
 			a.min_increment, a.price_decrement, a.decrement_interval_seconds,
 			a.status, a.starts_at, a.ends_at, a.extension_seconds,
@@ -157,7 +157,7 @@ func (r *Repository) GetAuctionBySlug(ctx context.Context, slug string) (*Auctio
 
 	query := `
 		SELECT
-			a.id, a.slug, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
+			a.id, COALESCE(a.slug, ''), a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
 			a.starting_price, a.current_price, a.reserve_price, a.buy_now_price, a.price_currency,
 			a.min_increment, a.price_decrement, a.decrement_interval_seconds,
 			a.status, a.starts_at, a.ends_at, a.extension_seconds,
@@ -217,7 +217,7 @@ func (r *Repository) GetAuctionBySlug(ctx context.Context, slug string) (*Auctio
 func (r *Repository) SearchAuctions(ctx context.Context, params SearchAuctionsParams) (*AuctionListResult, error) {
 	baseQuery := `
 		SELECT
-			a.id, a.slug, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
+			a.id, COALESCE(a.slug, ''), a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
 			a.starting_price, a.current_price, a.reserve_price, a.buy_now_price, a.price_currency,
 			a.min_increment, a.price_decrement, a.decrement_interval_seconds,
 			a.status, a.starts_at, a.ends_at, a.extension_seconds,
