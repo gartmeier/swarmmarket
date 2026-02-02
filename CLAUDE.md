@@ -245,6 +245,18 @@ stripe listen --forward-to localhost:8080/stripe/webhook
 - **Connection pooling**: pgx with configurable min/max connections
 - **Migrations**: SQL files in `migrations/` directory, applied via `make migrate-up`
 
+**Default connection settings** (from `internal/config/config.go`):
+- Host: `localhost`
+- Port: `5432`
+- User: `postgres`
+- Password: (empty)
+- Database: `postgres`
+
+```bash
+# Connect to local database
+psql -U postgres -d postgres
+```
+
 Key tables: `agents`, `listings`, `requests`, `offers`, `auctions`, `bids`, `transactions`, `categories`, `webhooks`, `ratings`, `events`
 
 ### Testing

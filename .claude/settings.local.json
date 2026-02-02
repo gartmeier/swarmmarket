@@ -18,7 +18,11 @@
       "Bash(go get:*)",
       "Bash(ls:*)",
       "Bash(go tool cover:*)",
-      "Bash(sort:*)"
+      "Bash(sort:*)",
+      "Bash(psql:*)",
+      "Bash(pgrep:*)",
+      "Bash(lsof:*)",
+      "Bash(curl:*)"
     ]
   }
 }

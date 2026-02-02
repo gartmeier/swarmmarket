@@ -3,8 +3,11 @@ package auction
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/digi604/swarmmarket/backend/internal/common"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,24 +28,37 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+// generateUniqueSlug generates a unique slug from title + short UUID.
+func generateUniqueSlug(title string, id uuid.UUID) string {
+	baseSlug := common.GenerateSlug(title)
+	if baseSlug == "" {
+		baseSlug = "auction"
+	}
+	return fmt.Sprintf("%s-%s", baseSlug, id.String()[:8])
+}
+
 // CreateAuction creates a new auction.
 func (r *Repository) CreateAuction(ctx context.Context, auction *Auction) error {
+	// Generate unique slug from title + UUID prefix
+	auction.Slug = generateUniqueSlug(auction.Title, auction.ID)
+
 	query := `
 		INSERT INTO auctions (
-			id, listing_id, seller_id, auction_type, title, description,
+			id, slug, listing_id, seller_id, auction_type, title, description,
 			starting_price, current_price, reserve_price, buy_now_price, price_currency,
 			min_increment, price_decrement, decrement_interval_seconds,
 			status, starts_at, ends_at, extension_seconds, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6,
-			$7, $8, $9, $10, $11,
-			$12, $13, $14,
-			$15, $16, $17, $18, $19, $20, $21
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12,
+			$13, $14, $15,
+			$16, $17, $18, $19, $20, $21, $22
 		)
 	`
 
 	_, err := r.pool.Exec(ctx, query,
 		auction.ID,
+		auction.Slug,
 		auction.ListingID,
 		auction.SellerID,
 		auction.AuctionType,
@@ -72,19 +88,24 @@ func (r *Repository) CreateAuction(ctx context.Context, auction *Auction) error 
 func (r *Repository) GetAuctionByID(ctx context.Context, id uuid.UUID) (*Auction, error) {
 	query := `
 		SELECT
-			a.id, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
+			a.id, a.slug, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
 			a.starting_price, a.current_price, a.reserve_price, a.buy_now_price, a.price_currency,
 			a.min_increment, a.price_decrement, a.decrement_interval_seconds,
 			a.status, a.starts_at, a.ends_at, a.extension_seconds,
 			a.winning_bid_id, a.winner_id, a.metadata, a.created_at, a.updated_at,
-			(SELECT COUNT(*) FROM bids WHERE auction_id = a.id) as bid_count
+			(SELECT COUNT(*) FROM bids WHERE auction_id = a.id) as bid_count,
+			COALESCE(ag.name, '') as seller_name,
+			ag.avatar_url as seller_avatar_url,
+			COALESCE(ag.average_rating, 0) as seller_rating
 		FROM auctions a
+		LEFT JOIN agents ag ON a.seller_id = ag.id
 		WHERE a.id = $1
 	`
 
 	var auction Auction
 	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&auction.ID,
+		&auction.Slug,
 		&auction.ListingID,
 		&auction.SellerID,
 		&auction.AuctionType,
@@ -108,6 +129,78 @@ func (r *Repository) GetAuctionByID(ctx context.Context, id uuid.UUID) (*Auction
 		&auction.CreatedAt,
 		&auction.UpdatedAt,
 		&auction.BidCount,
+		&auction.SellerName,
+		&auction.SellerAvatarURL,
+		&auction.SellerRating,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrAuctionNotFound
+		}
+		return nil, err
+	}
+
+	return &auction, nil
+}
+
+// GetAuctionBySlug retrieves an auction by slug (extracts UUID suffix).
+func (r *Repository) GetAuctionBySlug(ctx context.Context, slug string) (*Auction, error) {
+	parts := strings.Split(slug, "-")
+	if len(parts) < 2 {
+		return nil, ErrAuctionNotFound
+	}
+	uuidPrefix := parts[len(parts)-1]
+	if len(uuidPrefix) != 8 {
+		return nil, ErrAuctionNotFound
+	}
+
+	query := `
+		SELECT
+			a.id, a.slug, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
+			a.starting_price, a.current_price, a.reserve_price, a.buy_now_price, a.price_currency,
+			a.min_increment, a.price_decrement, a.decrement_interval_seconds,
+			a.status, a.starts_at, a.ends_at, a.extension_seconds,
+			a.winning_bid_id, a.winner_id, a.metadata, a.created_at, a.updated_at,
+			(SELECT COUNT(*) FROM bids WHERE auction_id = a.id) as bid_count,
+			COALESCE(ag.name, '') as seller_name,
+			ag.avatar_url as seller_avatar_url,
+			COALESCE(ag.average_rating, 0) as seller_rating
+		FROM auctions a
+		LEFT JOIN agents ag ON a.seller_id = ag.id
+		WHERE a.id::text LIKE $1
+	`
+
+	var auction Auction
+	err := r.pool.QueryRow(ctx, query, uuidPrefix+"%").Scan(
+		&auction.ID,
+		&auction.Slug,
+		&auction.ListingID,
+		&auction.SellerID,
+		&auction.AuctionType,
+		&auction.Title,
+		&auction.Description,
+		&auction.StartingPrice,
+		&auction.CurrentPrice,
+		&auction.ReservePrice,
+		&auction.BuyNowPrice,
+		&auction.Currency,
+		&auction.MinIncrement,
+		&auction.PriceDecrement,
+		&auction.DecrementIntervalSecs,
+		&auction.Status,
+		&auction.StartsAt,
+		&auction.EndsAt,
+		&auction.ExtensionSeconds,
+		&auction.WinningBidID,
+		&auction.WinnerID,
+		&auction.Metadata,
+		&auction.CreatedAt,
+		&auction.UpdatedAt,
+		&auction.BidCount,
+		&auction.SellerName,
+		&auction.SellerAvatarURL,
+		&auction.SellerRating,
 	)
 
 	if err != nil {
@@ -124,13 +217,17 @@ func (r *Repository) GetAuctionByID(ctx context.Context, id uuid.UUID) (*Auction
 func (r *Repository) SearchAuctions(ctx context.Context, params SearchAuctionsParams) (*AuctionListResult, error) {
 	baseQuery := `
 		SELECT
-			a.id, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
+			a.id, a.slug, a.listing_id, a.seller_id, a.auction_type, a.title, a.description,
 			a.starting_price, a.current_price, a.reserve_price, a.buy_now_price, a.price_currency,
 			a.min_increment, a.price_decrement, a.decrement_interval_seconds,
 			a.status, a.starts_at, a.ends_at, a.extension_seconds,
 			a.winning_bid_id, a.winner_id, a.metadata, a.created_at, a.updated_at,
-			(SELECT COUNT(*) FROM bids WHERE auction_id = a.id) as bid_count
+			(SELECT COUNT(*) FROM bids WHERE auction_id = a.id) as bid_count,
+			COALESCE(ag.name, '') as seller_name,
+			ag.avatar_url as seller_avatar_url,
+			COALESCE(ag.average_rating, 0) as seller_rating
 		FROM auctions a
+		LEFT JOIN agents ag ON a.seller_id = ag.id
 		WHERE 1=1
 	`
 
@@ -196,6 +293,7 @@ func (r *Repository) SearchAuctions(ctx context.Context, params SearchAuctionsPa
 		var auction Auction
 		if err := rows.Scan(
 			&auction.ID,
+			&auction.Slug,
 			&auction.ListingID,
 			&auction.SellerID,
 			&auction.AuctionType,
@@ -219,6 +317,9 @@ func (r *Repository) SearchAuctions(ctx context.Context, params SearchAuctionsPa
 			&auction.CreatedAt,
 			&auction.UpdatedAt,
 			&auction.BidCount,
+			&auction.SellerName,
+			&auction.SellerAvatarURL,
+			&auction.SellerRating,
 		); err != nil {
 			return nil, err
 		}

@@ -41,10 +41,15 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*Register
 	keyPrefix := apiKey[:8] // Store prefix for identification
 
 	now := time.Now().UTC()
+	var avatarURL *string
+	if req.AvatarURL != "" {
+		avatarURL = &req.AvatarURL
+	}
 	agent := &Agent{
 		ID:                uuid.New(),
 		Name:              req.Name,
 		Description:       req.Description,
+		AvatarURL:         avatarURL,
 		OwnerEmail:        req.OwnerEmail,
 		APIKeyHash:        keyHash,
 		APIKeyPrefix:      keyPrefix,
@@ -80,7 +85,16 @@ func (s *Service) GetPublicProfile(ctx context.Context, id uuid.UUID) (*AgentPub
 	if err != nil {
 		return nil, err
 	}
-	return agent.PublicProfile(), nil
+
+	profile := agent.PublicProfile()
+
+	// Count active listings
+	listingCount, err := s.repo.CountActiveListings(ctx, id)
+	if err == nil {
+		profile.ActiveListings = listingCount
+	}
+
+	return profile, nil
 }
 
 // ValidateAPIKey validates an API key and returns the associated agent.
@@ -112,6 +126,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req *UpdateRequest) 
 	}
 	if req.Description != nil {
 		agent.Description = *req.Description
+	}
+	if req.AvatarURL != nil {
+		agent.AvatarURL = req.AvatarURL
 	}
 	if req.Metadata != nil {
 		if agent.Metadata == nil {

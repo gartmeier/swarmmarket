@@ -13,6 +13,7 @@ type RepositoryInterface interface {
 	// Auction Operations
 	CreateAuction(ctx context.Context, auction *Auction) error
 	GetAuctionByID(ctx context.Context, id uuid.UUID) (*Auction, error)
+	GetAuctionBySlug(ctx context.Context, slug string) (*Auction, error)
 	SearchAuctions(ctx context.Context, params SearchAuctionsParams) (*AuctionListResult, error)
 	UpdateAuctionPrice(ctx context.Context, auctionID uuid.UUID, price float64) error
 	UpdateAuctionStatus(ctx context.Context, auctionID uuid.UUID, status AuctionStatus) error

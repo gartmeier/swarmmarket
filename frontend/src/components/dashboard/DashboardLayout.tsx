@@ -12,9 +12,9 @@ import {
 import { useApiSetup } from '../../hooks/useDashboard';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-  { icon: Store, label: 'Marketplace', path: '/dashboard/marketplace' },
-  { icon: Settings, label: 'Settings', path: '/dashboard/settings' },
+  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', highlight: false },
+  { icon: Store, label: 'Marketplace', path: '/dashboard/marketplace', highlight: true },
+  { icon: Settings, label: 'Settings', path: '/dashboard/settings', highlight: false },
 ];
 
 export function DashboardLayout() {
@@ -30,8 +30,9 @@ export function DashboardLayout() {
 
   // Determine if sidebar should be collapsed based on route
   const isAgentDetailPage = /^\/dashboard\/agents\/[^/]+/.test(location.pathname);
+  const isMarketplaceDetailPage = /^\/dashboard\/marketplace\/(listings|requests|auctions)\/[^/]+/.test(location.pathname);
   const isMarketplacePage = location.pathname === '/dashboard/marketplace';
-  const isCollapsed = isAgentDetailPage;
+  const isCollapsed = isAgentDetailPage || isMarketplaceDetailPage;
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -68,7 +69,7 @@ export function DashboardLayout() {
           </div>
 
           {/* Navigation */}
-          <nav className="flex flex-col gap-1">
+          <nav className="flex flex-col gap-1 items-start w-full">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
@@ -77,23 +78,28 @@ export function DashboardLayout() {
                   to={item.path}
                   end={item.path === '/dashboard'}
                   className={({ isActive }) =>
-                    `flex items-center rounded-lg transition-colors ${
-                      isCollapsed ? 'justify-center' : 'gap-3'
-                    } ${isActive ? 'bg-[#1E293B]' : 'hover:bg-[#1E293B]/50'}`
+                    `flex items-center rounded-lg transition-colors w-full ${
+                      isCollapsed ? 'justify-center' : 'justify-start gap-3'
+                    } ${isActive ? 'bg-[#1E293B]' : 'hover:bg-[#1E293B]/50'} ${
+                      item.highlight && !isActive ? 'ring-1 ring-[#22D3EE]/30' : ''
+                    }`
                   }
-                  style={{ padding: isCollapsed ? '12px' : '12px 16px' }}
+                  style={{
+                    padding: isCollapsed ? '12px' : '12px 16px',
+                    background: item.highlight ? 'linear-gradient(135deg, rgba(34, 211, 238, 0.08) 0%, rgba(168, 85, 247, 0.08) 100%)' : undefined,
+                  }}
                   title={isCollapsed ? item.label : undefined}
                 >
                   {({ isActive }) => (
                     <>
                       <Icon
                         className="w-5 h-5"
-                        style={{ color: isActive ? '#22D3EE' : '#64748B' }}
+                        style={{ color: isActive ? '#22D3EE' : item.highlight ? '#22D3EE' : '#64748B' }}
                       />
                       {!isCollapsed && (
                         <span
-                          className="text-sm font-medium"
-                          style={{ color: isActive ? '#FFFFFF' : '#94A3B8' }}
+                          className="text-sm font-medium text-left"
+                          style={{ color: isActive ? '#FFFFFF' : item.highlight ? '#E0F2FE' : '#94A3B8' }}
                         >
                           {item.label}
                         </span>
@@ -207,7 +213,7 @@ export function DashboardLayout() {
         style={{ padding: '32px 40px' }}
       >
         {/* Header - Only show on dashboard home and settings */}
-        {!isAgentDetailPage && !isMarketplacePage && (
+        {!isAgentDetailPage && !isMarketplacePage && !isMarketplaceDetailPage && (
           <div style={{ marginBottom: '32px' }}>
             <h1 className="text-[28px] font-bold text-white leading-tight">
               Welcome back, {firstName}

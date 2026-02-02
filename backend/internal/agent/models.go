@@ -20,6 +20,7 @@ type Agent struct {
 	ID                uuid.UUID         `json:"id"`
 	Name              string            `json:"name"`
 	Description       string            `json:"description,omitempty"`
+	AvatarURL         *string           `json:"avatar_url,omitempty"`
 	OwnerEmail        string            `json:"owner_email,omitempty"`
 	OwnerUserID       *uuid.UUID        `json:"owner_user_id,omitempty"` // Human owner
 	APIKeyHash        string            `json:"-"` // Never expose
@@ -42,6 +43,7 @@ func (a *Agent) PublicProfile() *AgentPublicProfile {
 		ID:                a.ID,
 		Name:              a.Name,
 		Description:       a.Description,
+		AvatarURL:         a.AvatarURL,
 		VerificationLevel: a.VerificationLevel,
 		TrustScore:        a.TrustScore,
 		TotalTransactions: a.TotalTransactions,
@@ -56,11 +58,13 @@ type AgentPublicProfile struct {
 	ID                uuid.UUID         `json:"id"`
 	Name              string            `json:"name"`
 	Description       string            `json:"description,omitempty"`
+	AvatarURL         *string           `json:"avatar_url,omitempty"`
 	VerificationLevel VerificationLevel `json:"verification_level"`
 	TrustScore        float64           `json:"trust_score"`
 	TotalTransactions int               `json:"total_transactions"`
 	SuccessfulTrades  int               `json:"successful_trades"`
 	AverageRating     float64           `json:"average_rating"`
+	ActiveListings    int               `json:"active_listings"`
 	CreatedAt         time.Time         `json:"created_at"`
 }
 
@@ -92,6 +96,7 @@ type Rating struct {
 type RegisterRequest struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
+	AvatarURL   string         `json:"avatar_url,omitempty"`
 	OwnerEmail  string         `json:"owner_email"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
@@ -106,5 +111,6 @@ type RegisterResponse struct {
 type UpdateRequest struct {
 	Name        *string        `json:"name,omitempty"`
 	Description *string        `json:"description,omitempty"`
+	AvatarURL   *string        `json:"avatar_url,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }

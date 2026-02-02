@@ -18,11 +18,17 @@ type TransactionCreator interface {
 	CreateFromOffer(ctx context.Context, buyerID, sellerID uuid.UUID, requestID, offerID *uuid.UUID, amount float64, currency string) (uuid.UUID, error)
 }
 
+// WalletChecker interface for checking wallet balance.
+type WalletChecker interface {
+	GetAgentWalletBalance(ctx context.Context, agentID uuid.UUID) (available float64, err error)
+}
+
 // Service handles marketplace business logic.
 type Service struct {
 	repo               RepositoryInterface
 	publisher          EventPublisher
 	transactionCreator TransactionCreator
+	walletChecker      WalletChecker
 }
 
 // NewService creates a new marketplace service.
@@ -36,6 +42,11 @@ func NewService(repo RepositoryInterface, publisher EventPublisher) *Service {
 // SetTransactionCreator sets the transaction creator (to avoid circular dependency).
 func (s *Service) SetTransactionCreator(tc TransactionCreator) {
 	s.transactionCreator = tc
+}
+
+// SetWalletChecker sets the wallet checker (to avoid circular dependency).
+func (s *Service) SetWalletChecker(wc WalletChecker) {
+	s.walletChecker = wc
 }
 
 // --- Listings ---
@@ -92,6 +103,11 @@ func (s *Service) CreateListing(ctx context.Context, sellerID uuid.UUID, req *Cr
 // GetListing retrieves a listing by ID.
 func (s *Service) GetListing(ctx context.Context, id uuid.UUID) (*Listing, error) {
 	return s.repo.GetListingByID(ctx, id)
+}
+
+// GetListingBySlug retrieves a listing by slug.
+func (s *Service) GetListingBySlug(ctx context.Context, slug string) (*Listing, error) {
+	return s.repo.GetListingBySlug(ctx, slug)
 }
 
 // SearchListings searches for listings.
@@ -165,6 +181,11 @@ func (s *Service) CreateRequest(ctx context.Context, requesterID uuid.UUID, req 
 // GetRequest retrieves a request by ID.
 func (s *Service) GetRequest(ctx context.Context, id uuid.UUID) (*Request, error) {
 	return s.repo.GetRequestByID(ctx, id)
+}
+
+// GetRequestBySlug retrieves a request by slug.
+func (s *Service) GetRequestBySlug(ctx context.Context, slug string) (*Request, error) {
+	return s.repo.GetRequestBySlug(ctx, slug)
 }
 
 // SearchRequests searches for open requests.
@@ -250,6 +271,17 @@ func (s *Service) AcceptOffer(ctx context.Context, requesterID uuid.UUID, offerI
 	}
 	if offer.Status != OfferStatusPending {
 		return nil, fmt.Errorf("offer is not pending")
+	}
+
+	// Check wallet balance if wallet checker is available
+	if s.walletChecker != nil {
+		balance, err := s.walletChecker.GetAgentWalletBalance(ctx, requesterID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check wallet balance: %w", err)
+		}
+		if balance < offer.PriceAmount {
+			return nil, fmt.Errorf("insufficient funds: need %.2f %s, have %.2f", offer.PriceAmount, offer.PriceCurrency, balance)
+		}
 	}
 
 	// Update offer status

@@ -39,6 +39,7 @@ const (
 // Auction represents an auction.
 type Auction struct {
 	ID                      uuid.UUID      `json:"id"`
+	Slug                    string         `json:"slug,omitempty"`
 	ListingID               *uuid.UUID     `json:"listing_id,omitempty"`
 	SellerID                uuid.UUID      `json:"seller_id"`
 	AuctionType             AuctionType    `json:"auction_type"`
@@ -62,6 +63,12 @@ type Auction struct {
 	Metadata                map[string]any `json:"metadata,omitempty"`
 	CreatedAt               time.Time      `json:"created_at"`
 	UpdatedAt               time.Time      `json:"updated_at"`
+
+	// Enriched fields (from agent join)
+	SellerName        string  `json:"seller_name,omitempty"`
+	SellerAvatarURL   *string `json:"seller_avatar_url,omitempty"`
+	SellerRating      float64 `json:"seller_rating,omitempty"`
+	SellerRatingCount int     `json:"seller_rating_count,omitempty"`
 }
 
 // Bid represents a bid on an auction.

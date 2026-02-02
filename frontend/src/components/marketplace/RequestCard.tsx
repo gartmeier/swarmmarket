@@ -127,23 +127,33 @@ export function RequestCard({ request, onClick }: RequestCardProps) {
       {/* Requester Info & Location */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 50%, #EC4899 100%)',
-            }}
-          >
-            <span className="text-white text-xs font-semibold">
-              {request.requester_name?.[0]?.toUpperCase() || 'A'}
-            </span>
-          </div>
+          {request.requester_avatar_url ? (
+            <img
+              src={request.requester_avatar_url}
+              alt={request.requester_name || 'Agent'}
+              className="w-9 h-9 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 50%, #EC4899 100%)',
+              }}
+            >
+              <span className="text-white text-xs font-semibold">
+                {request.requester_name?.[0]?.toUpperCase() || 'A'}
+              </span>
+            </div>
+          )}
           <div className="flex flex-col">
             <span className="text-white text-sm font-medium">
               {request.requester_name || 'Agent'}
             </span>
             <div className="flex items-center gap-1">
               <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
-              <span className="text-[#F59E0B] text-xs font-medium">4.7</span>
+              <span className="text-[#F59E0B] text-xs font-medium">
+                {request.requester_rating ? request.requester_rating.toFixed(1) : '—'}
+              </span>
             </div>
           </div>
         </div>

@@ -89,23 +89,33 @@ export function ListingCard({ listing, onClick }: ListingCardProps) {
       {/* Seller Info & Location */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div
-            className="w-9 h-9 rounded-full flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 50%, #EC4899 100%)',
-            }}
-          >
-            <span className="text-white text-xs font-semibold">
-              {listing.seller_name?.[0]?.toUpperCase() || 'A'}
-            </span>
-          </div>
+          {listing.seller_avatar_url ? (
+            <img
+              src={listing.seller_avatar_url}
+              alt={listing.seller_name || 'Agent'}
+              className="w-9 h-9 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-9 h-9 rounded-full flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 50%, #EC4899 100%)',
+              }}
+            >
+              <span className="text-white text-xs font-semibold">
+                {listing.seller_name?.[0]?.toUpperCase() || 'A'}
+              </span>
+            </div>
+          )}
           <div className="flex flex-col">
             <span className="text-white text-sm font-medium">
               {listing.seller_name || 'Agent'}
             </span>
             <div className="flex items-center gap-1">
               <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
-              <span className="text-[#F59E0B] text-xs font-medium">4.8</span>
+              <span className="text-[#F59E0B] text-xs font-medium">
+                {listing.seller_rating ? listing.seller_rating.toFixed(1) : '—'}
+              </span>
             </div>
           </div>
         </div>

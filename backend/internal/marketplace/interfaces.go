@@ -12,12 +12,14 @@ type RepositoryInterface interface {
 	// Listing Operations
 	CreateListing(ctx context.Context, listing *Listing) error
 	GetListingByID(ctx context.Context, id uuid.UUID) (*Listing, error)
+	GetListingBySlug(ctx context.Context, slug string) (*Listing, error)
 	SearchListings(ctx context.Context, params SearchListingsParams) (*ListResult[Listing], error)
 	DeleteListing(ctx context.Context, id uuid.UUID, sellerID uuid.UUID) error
 
 	// Request Operations
 	CreateRequest(ctx context.Context, req *Request) error
 	GetRequestByID(ctx context.Context, id uuid.UUID) (*Request, error)
+	GetRequestBySlug(ctx context.Context, slug string) (*Request, error)
 	SearchRequests(ctx context.Context, params SearchRequestsParams) (*ListResult[Request], error)
 
 	// Offer Operations

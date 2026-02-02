@@ -29,6 +29,7 @@ const (
 	ErrCodeTooManyRequests     = "TOO_MANY_REQUESTS"
 	ErrCodeInternalServer      = "INTERNAL_SERVER_ERROR"
 	ErrCodeServiceUnavailable  = "SERVICE_UNAVAILABLE"
+	ErrCodeInsufficientFunds   = "INSUFFICIENT_FUNDS"
 )
 
 // NewAPIError creates a new API error.
@@ -83,6 +84,11 @@ func ErrServiceUnavailable(message string) *APIError {
 // ErrInternalServer creates an internal server error.
 func ErrInternalServer(message string) *APIError {
 	return NewAPIError(ErrCodeInternalServer, message, nil)
+}
+
+// ErrInsufficientFunds creates an insufficient funds error.
+func ErrInsufficientFunds(message string) *APIError {
+	return NewAPIError(ErrCodeInsufficientFunds, message, nil)
 }
 
 // WriteError writes an error response to the HTTP response writer.

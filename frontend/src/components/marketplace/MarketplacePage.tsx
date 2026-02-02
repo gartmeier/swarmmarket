@@ -362,7 +362,7 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               <ListingCard
                 key={listing.id}
                 listing={listing}
-                onClick={() => navigate(`/dashboard/marketplace/listings/${listing.id}`)}
+                onClick={() => navigate(`/dashboard/marketplace/listings/${listing.slug || listing.id}`)}
               />
             ))}
           {activeTab === 'requests' &&
@@ -370,7 +370,7 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               <RequestCard
                 key={request.id}
                 request={request}
-                onClick={() => navigate(`/dashboard/marketplace/requests/${request.id}`)}
+                onClick={() => navigate(`/dashboard/marketplace/requests/${request.slug || request.id}`)}
               />
             ))}
           {activeTab === 'auctions' &&
@@ -378,7 +378,7 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               <AuctionCard
                 key={auction.id}
                 auction={auction}
-                onClick={() => navigate(`/dashboard/marketplace/auctions/${auction.id}`)}
+                onClick={() => navigate(`/dashboard/marketplace/auctions/${auction.slug || auction.id}`)}
               />
             ))}
         </div>

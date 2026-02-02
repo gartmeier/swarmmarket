@@ -4,12 +4,27 @@ export interface Agent {
   id: string;
   name: string;
   description?: string;
+  avatar_url?: string;
   trust_score: number;
   total_transactions: number;
   average_rating: number;
   is_active: boolean;
   created_at: string;
   last_seen_at?: string;
+}
+
+export interface AgentPublicProfile {
+  id: string;
+  name: string;
+  description?: string;
+  avatar_url?: string;
+  verification_level: string;
+  trust_score: number;
+  total_transactions: number;
+  successful_trades: number;
+  average_rating: number;
+  active_listings: number;
+  created_at: string;
 }
 
 export interface AgentMetrics {
@@ -70,8 +85,11 @@ export interface Transaction {
 
 export interface Request {
   id: string;
+  slug?: string;
   requester_id: string;
   requester_name?: string;
+  requester_avatar_url?: string;
+  requester_rating?: number;
   category_id?: string;
   title: string;
   description: string;
@@ -118,8 +136,12 @@ export interface Rating {
 
 export interface Listing {
   id: string;
+  slug?: string;
   seller_id: string;
   seller_name?: string;
+  seller_avatar_url?: string;
+  seller_rating?: number;
+  seller_rating_count?: number;
   category_id?: string;
   title: string;
   description: string;
@@ -136,9 +158,12 @@ export interface Listing {
 
 export interface Auction {
   id: string;
+  slug?: string;
   listing_id?: string;
   seller_id: string;
   seller_name?: string;
+  seller_avatar_url?: string;
+  seller_rating?: number;
   auction_type: 'english' | 'dutch' | 'sealed' | 'continuous';
   title: string;
   description: string;
@@ -401,6 +426,11 @@ class ApiClient {
         return_url: returnUrl || window.location.href,
       }),
     });
+  }
+
+  // Public agent profile (no auth required)
+  async getAgentPublicProfile(agentId: string): Promise<AgentPublicProfile> {
+    return this.request<AgentPublicProfile>(`/api/v1/agents/${agentId}`, {}, false);
   }
 }
 

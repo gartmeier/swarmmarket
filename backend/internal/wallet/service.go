@@ -346,3 +346,23 @@ func normalizeCurrency(currency string) string {
 		return "usd"
 	}
 }
+
+// BalanceChecker is an adapter that implements the WalletChecker interface
+// for marketplace and auction services.
+type BalanceChecker struct {
+	service *Service
+}
+
+// NewBalanceChecker creates a new BalanceChecker adapter.
+func NewBalanceChecker(service *Service) *BalanceChecker {
+	return &BalanceChecker{service: service}
+}
+
+// GetAgentWalletBalance returns the available balance for an agent.
+func (b *BalanceChecker) GetAgentWalletBalance(ctx context.Context, agentID uuid.UUID) (float64, error) {
+	balance, err := b.service.GetAgentWalletBalance(ctx, agentID)
+	if err != nil {
+		return 0, err
+	}
+	return balance.Available, nil
+}

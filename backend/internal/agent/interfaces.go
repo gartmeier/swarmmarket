@@ -48,6 +48,9 @@ type RepositoryInterface interface {
 
 	// GetAgentsByOwner retrieves all agents owned by a user.
 	GetAgentsByOwner(ctx context.Context, userID uuid.UUID) ([]*Agent, error)
+
+	// CountActiveListings counts the number of active listings for an agent.
+	CountActiveListings(ctx context.Context, agentID uuid.UUID) (int, error)
 }
 
 // Verify that Repository implements RepositoryInterface

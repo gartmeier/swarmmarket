@@ -45,11 +45,11 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 func (r *Repository) Create(ctx context.Context, agent *Agent) error {
 	query := `
 		INSERT INTO agents (
-			id, name, description, owner_email, api_key_hash, api_key_prefix,
+			id, name, description, avatar_url, owner_email, api_key_hash, api_key_prefix,
 			verification_level, trust_score, total_transactions, successful_trades,
 			average_rating, is_active, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
 		)
 	`
 
@@ -57,6 +57,7 @@ func (r *Repository) Create(ctx context.Context, agent *Agent) error {
 		agent.ID,
 		agent.Name,
 		agent.Description,
+		agent.AvatarURL,
 		agent.OwnerEmail,
 		agent.APIKeyHash,
 		agent.APIKeyPrefix,
@@ -80,7 +81,7 @@ func (r *Repository) Create(ctx context.Context, agent *Agent) error {
 // GetByID retrieves an agent by ID.
 func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Agent, error) {
 	query := `
-		SELECT id, name, description, owner_email, owner_user_id, api_key_hash, api_key_prefix,
+		SELECT id, name, description, avatar_url, owner_email, owner_user_id, api_key_hash, api_key_prefix,
 			verification_level, trust_score, total_transactions, successful_trades,
 			average_rating, is_active, metadata, created_at, updated_at, last_seen_at
 		FROM agents
@@ -92,6 +93,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Agent, error) 
 		&agent.ID,
 		&agent.Name,
 		&agent.Description,
+		&agent.AvatarURL,
 		&agent.OwnerEmail,
 		&agent.OwnerUserID,
 		&agent.APIKeyHash,
@@ -120,7 +122,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Agent, error) 
 // GetByAPIKeyHash retrieves an agent by API key hash.
 func (r *Repository) GetByAPIKeyHash(ctx context.Context, hash string) (*Agent, error) {
 	query := `
-		SELECT id, name, description, owner_email, owner_user_id, api_key_hash, api_key_prefix,
+		SELECT id, name, description, avatar_url, owner_email, owner_user_id, api_key_hash, api_key_prefix,
 			verification_level, trust_score, total_transactions, successful_trades,
 			average_rating, is_active, metadata, created_at, updated_at, last_seen_at
 		FROM agents
@@ -132,6 +134,7 @@ func (r *Repository) GetByAPIKeyHash(ctx context.Context, hash string) (*Agent, 
 		&agent.ID,
 		&agent.Name,
 		&agent.Description,
+		&agent.AvatarURL,
 		&agent.OwnerEmail,
 		&agent.OwnerUserID,
 		&agent.APIKeyHash,
@@ -161,7 +164,7 @@ func (r *Repository) GetByAPIKeyHash(ctx context.Context, hash string) (*Agent, 
 func (r *Repository) Update(ctx context.Context, agent *Agent) error {
 	query := `
 		UPDATE agents
-		SET name = $2, description = $3, metadata = $4, updated_at = $5
+		SET name = $2, description = $3, avatar_url = $4, metadata = $5, updated_at = $6
 		WHERE id = $1
 	`
 
@@ -169,6 +172,7 @@ func (r *Repository) Update(ctx context.Context, agent *Agent) error {
 		agent.ID,
 		agent.Name,
 		agent.Description,
+		agent.AvatarURL,
 		agent.Metadata,
 		time.Now().UTC(),
 	)
@@ -348,7 +352,7 @@ func (r *Repository) GetAgentOwnerID(ctx context.Context, agentID uuid.UUID) (*u
 // GetAgentsByOwner retrieves all agents owned by a user.
 func (r *Repository) GetAgentsByOwner(ctx context.Context, userID uuid.UUID) ([]*Agent, error) {
 	query := `
-		SELECT id, name, description, owner_email, owner_user_id, api_key_hash, api_key_prefix,
+		SELECT id, name, description, avatar_url, owner_email, owner_user_id, api_key_hash, api_key_prefix,
 			verification_level, trust_score, total_transactions, successful_trades,
 			average_rating, is_active, metadata, created_at, updated_at, last_seen_at
 		FROM agents
@@ -369,6 +373,7 @@ func (r *Repository) GetAgentsByOwner(ctx context.Context, userID uuid.UUID) ([]
 			&agent.ID,
 			&agent.Name,
 			&agent.Description,
+			&agent.AvatarURL,
 			&agent.OwnerEmail,
 			&agent.OwnerUserID,
 			&agent.APIKeyHash,
@@ -391,4 +396,15 @@ func (r *Repository) GetAgentsByOwner(ctx context.Context, userID uuid.UUID) ([]
 	}
 
 	return agents, nil
+}
+
+// CountActiveListings counts the number of active listings for an agent.
+func (r *Repository) CountActiveListings(ctx context.Context, agentID uuid.UUID) (int, error) {
+	query := `SELECT COUNT(*) FROM listings WHERE seller_id = $1 AND status = 'active'`
+	var count int
+	err := r.pool.QueryRow(ctx, query, agentID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active listings: %w", err)
+	}
+	return count, nil
 }

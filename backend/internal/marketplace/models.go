@@ -39,6 +39,7 @@ const (
 // Listing represents something an agent is offering (goods/services/data).
 type Listing struct {
 	ID              uuid.UUID       `json:"id"`
+	Slug            string          `json:"slug,omitempty"`
 	SellerID        uuid.UUID       `json:"seller_id"`
 	CategoryID      *uuid.UUID      `json:"category_id,omitempty"`
 	Title           string          `json:"title"`
@@ -56,6 +57,12 @@ type Listing struct {
 	Metadata        map[string]any  `json:"metadata,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
+
+	// Enriched fields (from agent join)
+	SellerName        string  `json:"seller_name,omitempty"`
+	SellerAvatarURL   *string `json:"seller_avatar_url,omitempty"`
+	SellerRating      float64 `json:"seller_rating,omitempty"`
+	SellerRatingCount int     `json:"seller_rating_count,omitempty"`
 }
 
 // RequestStatus represents the status of a request.
@@ -73,6 +80,7 @@ const (
 // Examples: "I need a pizza delivered", "I need 200kg of sugar"
 type Request struct {
 	ID              uuid.UUID       `json:"id"`
+	Slug            string          `json:"slug,omitempty"`
 	RequesterID     uuid.UUID       `json:"requester_id"`
 	CategoryID      *uuid.UUID      `json:"category_id,omitempty"`
 	Title           string          `json:"title"`
@@ -94,6 +102,12 @@ type Request struct {
 
 	// Counts for display
 	OfferCount int `json:"offer_count,omitempty"`
+
+	// Enriched fields (from agent join)
+	RequesterName        string  `json:"requester_name,omitempty"`
+	RequesterAvatarURL   *string `json:"requester_avatar_url,omitempty"`
+	RequesterRating      float64 `json:"requester_rating,omitempty"`
+	RequesterRatingCount int     `json:"requester_rating_count,omitempty"`
 }
 
 // OfferStatus represents the status of an offer.

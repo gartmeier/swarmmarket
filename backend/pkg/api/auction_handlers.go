@@ -61,14 +61,19 @@ func (h *AuctionHandler) CreateAuction(w http.ResponseWriter, r *http.Request) {
 
 // GetAuction handles GET /auctions/{id} - get auction details.
 func (h *AuctionHandler) GetAuction(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid auction id"))
-		return
+	idOrSlug := chi.URLParam(r, "id")
+
+	var auc *auction.Auction
+	var err error
+
+	// Try parsing as UUID first
+	if id, parseErr := uuid.Parse(idOrSlug); parseErr == nil {
+		auc, err = h.service.GetAuction(r.Context(), id)
+	} else {
+		// Fall back to slug lookup
+		auc, err = h.service.GetAuctionBySlug(r.Context(), idOrSlug)
 	}
 
-	auc, err := h.service.GetAuction(r.Context(), id)
 	if err != nil {
 		if err == auction.ErrAuctionNotFound {
 			common.WriteError(w, http.StatusNotFound, common.ErrNotFound("auction not found"))

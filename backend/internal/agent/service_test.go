@@ -148,6 +148,10 @@ func (m *mockRepository) GetAgentsByOwner(ctx context.Context, userID uuid.UUID)
 	return m.agentsByOwner[userID], nil
 }
 
+func (m *mockRepository) CountActiveListings(ctx context.Context, agentID uuid.UUID) (int, error) {
+	return 0, nil
+}
+
 func TestGenerateAPIKey(t *testing.T) {
 	s := NewService(nil, 32)
 

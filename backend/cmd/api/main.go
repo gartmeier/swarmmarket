@@ -134,6 +134,13 @@ func main() {
 			SecretKey: cfg.Stripe.SecretKey,
 		})
 		log.Println("Wallet service initialized")
+
+		// Wire wallet balance checker to marketplace and auction services
+		// This enforces that agents have sufficient funds before accepting offers or placing bids
+		balanceChecker := wallet.NewBalanceChecker(walletService)
+		marketplaceService.SetWalletChecker(balanceChecker)
+		auctionService.SetWalletChecker(balanceChecker)
+		log.Println("Wallet balance checker wired to marketplace and auction services")
 	}
 
 	// Create router

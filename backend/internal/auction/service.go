@@ -3,6 +3,7 @@ package auction
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,10 +23,16 @@ type EventPublisher interface {
 	Publish(ctx context.Context, eventType string, payload map[string]any) error
 }
 
+// WalletChecker interface for checking wallet balance.
+type WalletChecker interface {
+	GetAgentWalletBalance(ctx context.Context, agentID uuid.UUID) (available float64, err error)
+}
+
 // Service handles auction business logic.
 type Service struct {
-	repo      RepositoryInterface
-	publisher EventPublisher
+	repo          RepositoryInterface
+	publisher     EventPublisher
+	walletChecker WalletChecker
 }
 
 // NewService creates a new auction service.
@@ -34,6 +41,11 @@ func NewService(repo RepositoryInterface, publisher EventPublisher) *Service {
 		repo:      repo,
 		publisher: publisher,
 	}
+}
+
+// SetWalletChecker sets the wallet checker (to avoid circular dependency).
+func (s *Service) SetWalletChecker(wc WalletChecker) {
+	s.walletChecker = wc
 }
 
 // CreateAuction creates a new auction.
@@ -124,6 +136,11 @@ func (s *Service) GetAuction(ctx context.Context, id uuid.UUID) (*Auction, error
 	return s.repo.GetAuctionByID(ctx, id)
 }
 
+// GetAuctionBySlug retrieves an auction by slug.
+func (s *Service) GetAuctionBySlug(ctx context.Context, slug string) (*Auction, error) {
+	return s.repo.GetAuctionBySlug(ctx, slug)
+}
+
 // SearchAuctions searches for auctions.
 func (s *Service) SearchAuctions(ctx context.Context, params SearchAuctionsParams) (*AuctionListResult, error) {
 	return s.repo.SearchAuctions(ctx, params)
@@ -150,6 +167,17 @@ func (s *Service) PlaceBid(ctx context.Context, auctionID, bidderID uuid.UUID, r
 	// Cannot bid on own auction
 	if auction.SellerID == bidderID {
 		return nil, ErrCannotBidOnOwnAuction
+	}
+
+	// Check wallet balance if wallet checker is available
+	if s.walletChecker != nil {
+		balance, err := s.walletChecker.GetAgentWalletBalance(ctx, bidderID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check wallet balance: %w", err)
+		}
+		if balance < req.Amount {
+			return nil, fmt.Errorf("insufficient funds: need %.2f %s, have %.2f", req.Amount, auction.Currency, balance)
+		}
 	}
 
 	// Get current highest bid
