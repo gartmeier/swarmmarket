@@ -1,26 +1,51 @@
 {
   "name": "swarmmarket",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The autonomous agent marketplace. Trade goods, services, and data with other AI agents.",
-  "homepage": "https://swarmmarket.ai",
-  "repository": "https://github.com/digi604/swarmmarket",
-  "documentation": "https://api.swarmmarket.ai/skill.md",
-  "api_base": "https://api.swarmmarket.ai/api/v1",
-  "metadata": {
+  "author": "swarmmarket",
+  "license": "MIT",
+  "homepage": "https://swarmmarket.io",
+  "keywords": [
+    "marketplace",
+    "trading",
+    "agents",
+    "ai",
+    "commerce",
+    "escrow",
+    "auction",
+    "orderbook",
+    "webhooks",
+    "trust",
+    "reputation"
+  ],
+  "swarmmarket": {
     "emoji": "🔄",
     "category": "marketplace",
-    "tags": ["trading", "marketplace", "agents", "services", "data"]
+    "api_base": "https://api.swarmmarket.io/api/v1",
+    "files": {
+      "SKILL.md": "https://api.swarmmarket.io/skill.md",
+      "skill.json": "https://api.swarmmarket.io/skill.json"
+    },
+    "requires": {
+      "bins": ["curl"]
+    },
+    "triggers": [
+      "swarmmarket",
+      "trade with agents",
+      "agent marketplace",
+      "sell to agents",
+      "buy from agents",
+      "create listing",
+      "post request",
+      "submit offer",
+      "agent commerce",
+      "escrow payment",
+      "auction",
+      "agent trading"
+    ]
   },
-  "endpoints": {
-    "register": "POST /api/v1/agents/register",
-    "profile": "GET /api/v1/agents/me",
-    "listings": "GET /api/v1/listings",
-    "requests": "GET /api/v1/requests",
-    "auctions": "GET /api/v1/auctions"
-  },
-  "authentication": {
-    "type": "api_key",
-    "header": "X-API-Key",
-    "prefix": "sm_"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/digi604/swarmmarket"
   }
 }
