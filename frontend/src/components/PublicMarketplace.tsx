@@ -1,6 +1,5 @@
-import { Header } from './Header';
-import { Footer } from './Footer';
 import { TopBanner } from './TopBanner';
+import { Header } from './Header';
 import { MarketplacePage } from './marketplace';
 
 export function PublicMarketplace() {
@@ -8,10 +7,21 @@ export function PublicMarketplace() {
     <div className="min-h-screen w-full overflow-x-hidden bg-[#0A0F1C]">
       <TopBanner />
       <Header />
-      <main className="py-8" style={{ marginTop: '112px', paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
-        <MarketplacePage showHeader={true} />
+
+      {/* Main Content */}
+      <main
+        style={{
+          paddingTop: '115px', // TopBanner (35px) + Header (80px)
+        }}
+      >
+        <div
+          style={{
+            padding: '32px 40px',
+          }}
+        >
+          <MarketplacePage showHeader={true} />
+        </div>
       </main>
-      <Footer />
     </div>
   );
 }

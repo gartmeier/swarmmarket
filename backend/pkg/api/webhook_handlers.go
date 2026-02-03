@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/digi604/swarmmarket/backend/internal/common"
 	"github.com/digi604/swarmmarket/backend/internal/notification"
 	"github.com/digi604/swarmmarket/backend/pkg/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // WebhookHandler handles webhook HTTP requests.
@@ -29,12 +29,12 @@ type CreateWebhookRequest struct {
 
 // WebhookResponse is the response for webhook endpoints.
 type WebhookResponse struct {
-	ID         uuid.UUID                  `json:"id"`
-	URL        string                     `json:"url"`
-	Secret     string                     `json:"secret,omitempty"` // Only on create
-	Events     []notification.EventType   `json:"events"`
-	IsActive   bool                       `json:"is_active"`
-	CreatedAt  string                     `json:"created_at"`
+	ID        uuid.UUID                `json:"id"`
+	URL       string                   `json:"url"`
+	Secret    string                   `json:"secret,omitempty"` // Only on create
+	Events    []notification.EventType `json:"events"`
+	IsActive  bool                     `json:"is_active"`
+	CreatedAt string                   `json:"created_at"`
 }
 
 // CreateWebhook handles POST /webhooks - create a new webhook.
@@ -63,28 +63,35 @@ func (h *WebhookHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Validate event types
 	validEvents := map[string]bool{
-		"request.created":    true,
-		"offer.received":     true,
-		"offer.accepted":     true,
-		"offer.rejected":     true,
-		"listing.created":    true,
-		"listing.updated":    true,
-		"auction.started":    true,
-		"bid.placed":         true,
-		"bid.outbid":         true,
-		"auction.ending_soon": true,
-		"auction.ended":      true,
-		"order.created":      true,
-		"escrow.funded":      true,
-		"delivery.confirmed": true,
-		"payment.released":   true,
-		"dispute.opened":     true,
-		"match.found":        true,
-		"order.filled":       true,
-		"transaction.created":   true,
-		"transaction.delivered": true,
-		"transaction.completed": true,
-		"rating.submitted":      true,
+		"request.created":           true,
+		"request.updated":           true,
+		"offer.received":            true,
+		"offer.accepted":            true,
+		"offer.rejected":            true,
+		"listing.created":           true,
+		"listing.updated":           true,
+		"listing.purchased":         true,
+		"comment.created":           true,
+		"auction.started":           true,
+		"bid.placed":                true,
+		"bid.outbid":                true,
+		"auction.ending_soon":       true,
+		"auction.ended":             true,
+		"order.created":             true,
+		"escrow.funded":             true,
+		"delivery.confirmed":        true,
+		"payment.released":          true,
+		"payment.failed":            true,
+		"payment.capture_failed":    true,
+		"dispute.opened":            true,
+		"match.found":               true,
+		"order.filled":              true,
+		"transaction.created":       true,
+		"transaction.escrow_funded": true,
+		"transaction.delivered":     true,
+		"transaction.completed":     true,
+		"transaction.refunded":      true,
+		"rating.submitted":          true,
 	}
 
 	for _, event := range req.Events {

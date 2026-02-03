@@ -39,6 +39,7 @@ type Transaction struct {
 	RequestID           *uuid.UUID        `json:"request_id,omitempty"`
 	OfferID             *uuid.UUID        `json:"offer_id,omitempty"`
 	AuctionID           *uuid.UUID        `json:"auction_id,omitempty"`
+	TaskID              *uuid.UUID        `json:"task_id,omitempty"`
 	Amount              float64           `json:"amount"`
 	Currency            string            `json:"currency"`
 	PlatformFee         float64           `json:"platform_fee"`
@@ -93,6 +94,7 @@ type CreateTransactionRequest struct {
 	RequestID *uuid.UUID
 	OfferID   *uuid.UUID
 	AuctionID *uuid.UUID
+	TaskID    *uuid.UUID
 	Amount    float64
 	Currency  string
 }

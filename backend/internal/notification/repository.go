@@ -244,3 +244,101 @@ func generateSecret(length int) (string, error) {
 	}
 	return base64.URLEncoding.EncodeToString(bytes), nil
 }
+
+// InsertEvent persists an event to the database for activity logging.
+func (r *Repository) InsertEvent(ctx context.Context, event *Event) error {
+	query := `
+		INSERT INTO events (id, event_type, agent_id, resource_type, resource_id, payload, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+
+	// Extract resource info from payload
+	var resourceType *string
+	var resourceID *uuid.UUID
+
+	if rt, ok := event.Payload["resource_type"].(string); ok {
+		resourceType = &rt
+	}
+	if rid, ok := event.Payload["resource_id"].(string); ok {
+		if parsed, err := uuid.Parse(rid); err == nil {
+			resourceID = &parsed
+		}
+	}
+
+	_, err := r.pool.Exec(ctx, query,
+		event.ID,
+		string(event.Type),
+		event.AgentID,
+		resourceType,
+		resourceID,
+		event.Payload,
+		event.CreatedAt,
+	)
+	return err
+}
+
+// ActivityEvent represents an event for the activity feed.
+type ActivityEvent struct {
+	ID           uuid.UUID      `json:"id"`
+	EventType    string         `json:"event_type"`
+	AgentID      uuid.UUID      `json:"agent_id"`
+	ResourceType *string        `json:"resource_type,omitempty"`
+	ResourceID   *uuid.UUID     `json:"resource_id,omitempty"`
+	Payload      map[string]any `json:"payload"`
+	CreatedAt    time.Time      `json:"created_at"`
+}
+
+// GetAgentActivity retrieves activity events for an agent.
+func (r *Repository) GetAgentActivity(ctx context.Context, agentID uuid.UUID, limit, offset int) ([]*ActivityEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	query := `
+		SELECT id, event_type, agent_id, resource_type, resource_id, payload, created_at
+		FROM events
+		WHERE agent_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.pool.Query(ctx, query, agentID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []*ActivityEvent
+	for rows.Next() {
+		var event ActivityEvent
+		if err := rows.Scan(
+			&event.ID,
+			&event.EventType,
+			&event.AgentID,
+			&event.ResourceType,
+			&event.ResourceID,
+			&event.Payload,
+			&event.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		events = append(events, &event)
+	}
+
+	if events == nil {
+		events = []*ActivityEvent{}
+	}
+
+	return events, nil
+}
+
+// GetAgentActivityCount returns the total count of activity events for an agent.
+func (r *Repository) GetAgentActivityCount(ctx context.Context, agentID uuid.UUID) (int, error) {
+	query := `SELECT COUNT(*) FROM events WHERE agent_id = $1`
+	var count int
+	err := r.pool.QueryRow(ctx, query, agentID).Scan(&count)
+	return count, err
+}

@@ -10,12 +10,12 @@ import (
 )
 
 var (
-	ErrAuctionNotActive    = errors.New("auction is not active")
-	ErrAuctionEnded        = errors.New("auction has ended")
-	ErrBidTooLow           = errors.New("bid amount is too low")
+	ErrAuctionNotActive      = errors.New("auction is not active")
+	ErrAuctionEnded          = errors.New("auction has ended")
+	ErrBidTooLow             = errors.New("bid amount is too low")
 	ErrCannotBidOnOwnAuction = errors.New("cannot bid on your own auction")
-	ErrNotAuthorized       = errors.New("not authorized to perform this action")
-	ErrInvalidAuctionType  = errors.New("invalid auction type")
+	ErrNotAuthorized         = errors.New("not authorized to perform this action")
+	ErrInvalidAuctionType    = errors.New("invalid auction type")
 )
 
 // EventPublisher publishes events to the notification system.
@@ -118,15 +118,17 @@ func (s *Service) CreateAuction(ctx context.Context, sellerID uuid.UUID, req *Cr
 		return nil, err
 	}
 
-	// Publish event
-	s.publishEvent(ctx, "auction.started", map[string]any{
-		"auction_id":     auction.ID,
-		"seller_id":      auction.SellerID,
-		"auction_type":   auction.AuctionType,
-		"title":          auction.Title,
-		"starting_price": auction.StartingPrice,
-		"ends_at":        auction.EndsAt,
-	})
+	if auction.Status == AuctionStatusActive {
+		// Publish event for auctions that start immediately
+		s.publishEvent(ctx, "auction.started", map[string]any{
+			"auction_id":     auction.ID,
+			"seller_id":      auction.SellerID,
+			"auction_type":   auction.AuctionType,
+			"title":          auction.Title,
+			"starting_price": auction.StartingPrice,
+			"ends_at":        auction.EndsAt,
+		})
+	}
 
 	return auction, nil
 }
@@ -381,6 +383,15 @@ func (s *Service) EndAuction(ctx context.Context, auctionID, requesterID uuid.UU
 	}
 
 	return s.repo.GetAuctionByID(ctx, auctionID)
+}
+
+// IsAuctionOwner checks if an agent owns an auction.
+func (s *Service) IsAuctionOwner(ctx context.Context, auctionID, agentID uuid.UUID) (bool, error) {
+	auction, err := s.repo.GetAuctionByID(ctx, auctionID)
+	if err != nil {
+		return false, err
+	}
+	return auction.SellerID == agentID, nil
 }
 
 // Helper to publish events asynchronously.

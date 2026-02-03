@@ -174,19 +174,12 @@ func (s *Service) ConfirmTwitterVerification(ctx context.Context, agentID uuid.U
 // --- Trust Score Calculation ---
 
 // RecalculateTrustScore recalculates and updates an agent's trust score.
+// Trust = Base (0%) + Human Link (+10%) + Verifications (+15%) + Transactions (up to +75%)
 func (s *Service) RecalculateTrustScore(ctx context.Context, agentID uuid.UUID) (float64, error) {
 	// Get current agent data
-	currentScore, isOwnerClaimed, successfulTrades, avgRating, err := s.repo.GetAgentTrustData(ctx, agentID)
+	currentScore, isOwnerClaimed, successfulTrades, _, err := s.repo.GetAgentTrustData(ctx, agentID)
 	if err != nil {
 		return 0, err
-	}
-
-	// If claimed by human owner, trust is always 1.0
-	if isOwnerClaimed {
-		if currentScore != OwnershipTrustScore {
-			s.repo.UpdateAgentTrustComponents(ctx, agentID, OwnershipTrustScore, 0, 0, 0)
-		}
-		return OwnershipTrustScore, nil
 	}
 
 	// Get verifications
@@ -203,15 +196,12 @@ func (s *Service) RecalculateTrustScore(ctx context.Context, agentID uuid.UUID) 
 	// Calculate transaction bonus (diminishing returns)
 	transactionBonus := TransactionTrustBonus(successfulTrades)
 
-	// Calculate rating bonus
-	ratingCount, _ := s.repo.GetRatingCount(ctx, agentID)
-	ratingBonus := RatingTrustBonus(avgRating, ratingCount)
+	// Calculate total: Base (0) + HumanLink (+10%) + Verifications + Transactions
+	// isOwnerClaimed adds +10% via CalculateTotalTrustScore
+	newScore := CalculateTotalTrustScore(isOwnerClaimed, verificationBonus, transactionBonus)
 
-	// Calculate total
-	newScore := CalculateTotalTrustScore(false, verificationBonus, transactionBonus, ratingBonus)
-
-	// Update agent
-	if err := s.repo.UpdateAgentTrustComponents(ctx, agentID, newScore, verificationBonus, transactionBonus, ratingBonus); err != nil {
+	// Update agent (pass 0 for rating bonus - ratings no longer affect trust)
+	if err := s.repo.UpdateAgentTrustComponents(ctx, agentID, newScore, verificationBonus, transactionBonus, 0); err != nil {
 		return 0, err
 	}
 
@@ -284,24 +274,30 @@ func (s *Service) OnRatingReceived(ctx context.Context, agentID uuid.UUID, ratin
 }
 
 // OnOwnershipClaimed should be called when an agent is claimed by a human owner.
+// This triggers a recalculation which adds +10% human link bonus.
 func (s *Service) OnOwnershipClaimed(ctx context.Context, agentID uuid.UUID, userID uuid.UUID) error {
 	currentScore, _, _, _, err := s.repo.GetAgentTrustData(ctx, agentID)
 	if err != nil {
 		return err
 	}
 
-	// Ownership gives instant max trust
-	newScore := OwnershipTrustScore
-	change := newScore - currentScore
+	// Recalculate trust score - now includes +10% human link bonus
+	newScore, err := s.RecalculateTrustScore(ctx, agentID)
+	if err != nil {
+		return err
+	}
 
-	s.repo.RecordTrustChange(ctx, &TrustScoreHistory{
-		AgentID:       agentID,
-		PreviousScore: currentScore,
-		NewScore:      newScore,
-		ChangeReason:  ReasonOwnershipClaimed,
-		ChangeAmount:  change,
-		Metadata:      map[string]any{"user_id": userID.String()},
-	})
+	change := newScore - currentScore
+	if change > 0 {
+		s.repo.RecordTrustChange(ctx, &TrustScoreHistory{
+			AgentID:       agentID,
+			PreviousScore: currentScore,
+			NewScore:      newScore,
+			ChangeReason:  ReasonOwnershipClaimed,
+			ChangeAmount:  change,
+			Metadata:      map[string]any{"user_id": userID.String()},
+		})
+	}
 
 	return nil
 }
@@ -310,13 +306,12 @@ func (s *Service) OnOwnershipClaimed(ctx context.Context, agentID uuid.UUID, use
 
 // GetTrustBreakdown returns the detailed trust score breakdown for an agent.
 func (s *Service) GetTrustBreakdown(ctx context.Context, agentID uuid.UUID) (*TrustBreakdown, error) {
-	currentScore, isOwnerClaimed, successfulTrades, avgRating, err := s.repo.GetAgentTrustData(ctx, agentID)
+	currentScore, isOwnerClaimed, successfulTrades, _, err := s.repo.GetAgentTrustData(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
 
 	verifications, _ := s.repo.GetVerificationsByAgent(ctx, agentID)
-	ratingCount, _ := s.repo.GetRatingCount(ctx, agentID)
 
 	// Build verification summaries
 	verificationSummaries := make([]VerificationSummary, 0, len(verifications))
@@ -338,7 +333,12 @@ func (s *Service) GetTrustBreakdown(ctx context.Context, agentID uuid.UUID) (*Tr
 	}
 
 	transactionBonus := TransactionTrustBonus(successfulTrades)
-	ratingBonus := RatingTrustBonus(avgRating, ratingCount)
+
+	// Calculate human link bonus
+	humanLinkBonus := 0.0
+	if isOwnerClaimed {
+		humanLinkBonus = HumanLinkBonus
+	}
 
 	// Get total transactions (not just successful)
 	// For now, we'll use successful trades as a proxy
@@ -350,13 +350,11 @@ func (s *Service) GetTrustBreakdown(ctx context.Context, agentID uuid.UUID) (*Tr
 		BaseScore:         BaseTrustScore,
 		VerificationBonus: verificationBonus,
 		TransactionBonus:  transactionBonus,
-		RatingBonus:       ratingBonus,
+		HumanLinkBonus:    humanLinkBonus,
 		IsOwnerClaimed:    isOwnerClaimed,
 		Verifications:     verificationSummaries,
 		TransactionCount:  totalTransactions,
 		SuccessfulTrades:  successfulTrades,
-		AverageRating:     avgRating,
-		RatingCount:       ratingCount,
 	}, nil
 }
 

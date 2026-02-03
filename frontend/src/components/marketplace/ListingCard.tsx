@@ -1,17 +1,10 @@
-import { Star, MapPin, Package, Wrench, Database } from 'lucide-react';
+import { Star, Code, Package, Wrench, Database } from 'lucide-react';
 import type { Listing } from '../../lib/api';
 
-const typeConfig = {
-  goods: { icon: Package, label: 'Goods', color: '#EC4899', bgColor: 'rgba(236, 72, 153, 0.2)' },
-  services: { icon: Wrench, label: 'Services', color: '#22D3EE', bgColor: 'rgba(34, 211, 238, 0.2)' },
-  data: { icon: Database, label: 'Data', color: '#A855F7', bgColor: 'rgba(168, 85, 247, 0.2)' },
-};
-
-const scopeLabels: Record<string, string> = {
-  local: 'Local',
-  regional: 'Regional',
-  national: 'National',
-  international: 'International',
+const typeConfig: Record<string, { icon: typeof Code; label: string; gradient: string }> = {
+  goods: { icon: Package, label: 'Goods', gradient: 'linear-gradient(135deg, #EC4899 0%, #F59E0B 100%)' },
+  services: { icon: Wrench, label: 'Services', gradient: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 100%)' },
+  data: { icon: Database, label: 'Data', gradient: 'linear-gradient(135deg, #A855F7 0%, #EC4899 100%)' },
 };
 
 interface ListingCardProps {
@@ -20,108 +13,115 @@ interface ListingCardProps {
 }
 
 export function ListingCard({ listing, onClick }: ListingCardProps) {
-  const type = typeConfig[listing.listing_type] || typeConfig.goods;
+  const type = typeConfig[listing.listing_type] || typeConfig.services;
   const TypeIcon = type.icon;
 
   const formatPrice = (amount?: number, currency?: string) => {
-    if (!amount) return 'Contact for price';
+    if (!amount) return 'Contact';
     const symbol = currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
     return `${symbol}${amount.toLocaleString()}`;
   };
 
+  // Extract tags from listing type and geographic scope
+  const tags: string[] = [];
+  if (listing.listing_type) {
+    const typeLabel = typeConfig[listing.listing_type]?.label;
+    if (typeLabel) tags.push(typeLabel);
+  }
+  if (listing.geographic_scope) {
+    const scopeLabels: Record<string, string> = {
+      local: 'Local',
+      regional: 'Regional',
+      national: 'National',
+      international: 'Global',
+    };
+    const scopeLabel = scopeLabels[listing.geographic_scope];
+    if (scopeLabel) tags.push(scopeLabel);
+  }
+
   return (
     <div
       onClick={onClick}
-      className="cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+      className="cursor-pointer transition-all hover:scale-[1.01] hover:border-[#475569]"
       style={{
-        backgroundColor: '#1E293B',
-        borderRadius: '16px',
+        backgroundColor: '#0F172A',
+        borderRadius: '12px',
         border: '1px solid #334155',
-        padding: '24px',
+        padding: '20px',
         display: 'flex',
         flexDirection: 'column',
         gap: '16px',
       }}
     >
-      {/* Header with Type Badge */}
-      <div className="flex items-start justify-between">
-        <div
-          className="flex items-center gap-1.5"
-          style={{
-            backgroundColor: type.bgColor,
-            borderRadius: '6px',
-            padding: '6px 10px',
-          }}
-        >
-          <TypeIcon className="w-3.5 h-3.5" style={{ color: type.color }} />
-          <span className="text-xs font-medium" style={{ color: type.color }}>
-            {type.label}
+      {/* Card Header - Avatar + Agent Info */}
+      <div className="flex items-center gap-3" style={{ width: '100%' }}>
+        {/* Avatar with gradient */}
+        {listing.seller_avatar_url ? (
+          <img
+            src={listing.seller_avatar_url}
+            alt={listing.seller_name || 'Agent'}
+            className="w-11 h-11 rounded-full object-cover flex-shrink-0"
+            style={{ border: '2px solid #334155' }}
+          />
+        ) : (
+          <div
+            className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: type.gradient }}
+          >
+            <TypeIcon className="w-5 h-5 text-white" />
+          </div>
+        )}
+        {/* Agent Info */}
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span className="text-white text-[15px] font-semibold truncate">
+            {listing.title}
+          </span>
+          <span className="text-[#64748B] text-xs truncate">
+            {listing.seller_name || 'Agent'}
           </span>
         </div>
-        {listing.quantity > 1 && (
-          <span className="text-xs text-[#64748B]">Qty: {listing.quantity}</span>
-        )}
       </div>
 
-      {/* Title & Description */}
-      <div className="flex flex-col gap-2">
-        <h3 className="text-white font-semibold text-base leading-tight line-clamp-2">
-          {listing.title}
-        </h3>
-        <p className="text-[#94A3B8] text-sm line-clamp-2">{listing.description}</p>
-      </div>
-
-      {/* Price Section */}
-      <div
-        className="flex items-center justify-between"
-        style={{
-          backgroundColor: '#0F172A',
-          borderRadius: '8px',
-          padding: '12px',
-        }}
+      {/* Description */}
+      <p
+        className="text-[#94A3B8] text-[13px] leading-relaxed line-clamp-3"
+        style={{ lineHeight: '1.5' }}
       >
-        <span className="text-[#64748B] text-xs">Price</span>
-        <span className="text-base font-bold" style={{ color: '#22C55E' }}>
-          {formatPrice(listing.price_amount, listing.price_currency)}
-        </span>
-      </div>
+        {listing.description}
+      </p>
 
-      {/* Seller Info & Location */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {listing.seller_avatar_url ? (
-            <img
-              src={listing.seller_avatar_url}
-              alt={listing.seller_name || 'Agent'}
-              className="w-9 h-9 rounded-full object-cover"
-            />
-          ) : (
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center"
+      {/* Tags */}
+      {tags.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {tags.slice(0, 3).map((tag, index) => (
+            <span
+              key={index}
+              className="text-[#94A3B8] text-[11px] font-medium"
               style={{
-                background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 50%, #EC4899 100%)',
+                backgroundColor: '#1E293B',
+                borderRadius: '12px',
+                padding: '4px 10px',
               }}
             >
-              <span className="text-white text-xs font-semibold">
-                {listing.seller_name?.[0]?.toUpperCase() || 'A'}
-              </span>
-            </div>
-          )}
-          <div className="flex flex-col">
-            <span className="text-white text-sm font-medium">
-              {listing.seller_name || 'Agent'}
+              {tag}
             </span>
-            <div className="flex items-center gap-1">
-              <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
-              <span className="text-[#F59E0B] text-xs font-medium">
-                {listing.seller_rating ? listing.seller_rating.toFixed(1) : '—'}
-              </span>
-            </div>
-          </div>
+          ))}
         </div>
-        <div className="flex items-center gap-1 text-[#64748B]">
-          <MapPin className="w-3.5 h-3.5" />
-          <span className="text-xs">{scopeLabels[listing.geographic_scope] || 'Global'}</span>
+      )}
+
+      {/* Footer - Price + Rating */}
+      <div className="flex items-center justify-between" style={{ width: '100%' }}>
+        <span
+          className="text-sm font-semibold"
+          style={{ color: '#22C55E', fontFamily: 'JetBrains Mono, monospace' }}
+        >
+          {formatPrice(listing.price_amount, listing.price_currency)}
+        </span>
+        <div className="flex items-center gap-1">
+          <Star className="w-3.5 h-3.5" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
+          <span className="text-[#94A3B8] text-xs">
+            {listing.seller_rating ? `${listing.seller_rating.toFixed(1)} (${listing.seller_rating_count || 0})` : '—'}
+          </span>
         </div>
       </div>
     </div>

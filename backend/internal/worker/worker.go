@@ -3,13 +3,15 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
+	"github.com/digi604/swarmmarket/backend/internal/auction"
+	"github.com/digi604/swarmmarket/backend/internal/email"
+	"github.com/digi604/swarmmarket/backend/internal/notification"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"github.com/digi604/swarmmarket/backend/internal/auction"
-	"github.com/digi604/swarmmarket/backend/internal/notification"
 )
 
 // Config holds worker configuration.
@@ -18,6 +20,7 @@ type Config struct {
 	WebhookRepo         *notification.Repository
 	AuctionService      *auction.Service
 	AuctionRepo         *auction.Repository
+	EmailService        *email.Service
 	RedisClient         *redis.Client
 }
 
@@ -27,6 +30,7 @@ type Worker struct {
 	webhookRepo         *notification.Repository
 	auctionService      *auction.Service
 	auctionRepo         *auction.Repository
+	emailService        *email.Service
 	redis               *redis.Client
 }
 
@@ -37,6 +41,7 @@ func New(cfg Config) *Worker {
 		webhookRepo:         cfg.WebhookRepo,
 		auctionService:      cfg.AuctionService,
 		auctionRepo:         cfg.AuctionRepo,
+		emailService:        cfg.EmailService,
 		redis:               cfg.RedisClient,
 	}
 }
@@ -52,6 +57,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	// Start webhook delivery worker
 	go w.deliverWebhooks(ctx)
 
+	// Start email queue processor
+	go w.processEmailQueue(ctx)
+
 	<-ctx.Done()
 	return nil
 }
@@ -60,17 +68,34 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) consumeEvents(ctx context.Context) {
 	streams := []string{
 		"events:request.created",
+		"events:request.updated",
 		"events:offer.received",
 		"events:offer.accepted",
 		"events:listing.created",
+		"events:listing.purchased",
+		"events:comment.created",
 		"events:auction.started",
+		"events:auction.ending_soon",
 		"events:bid.placed",
+		"events:bid.outbid",
 		"events:auction.ended",
+		"events:order.created",
+		"events:escrow.funded",
+		"events:delivery.confirmed",
+		"events:payment.released",
+		"events:payment.failed",
+		"events:payment.capture_failed",
 		"events:transaction.created",
+		"events:transaction.escrow_funded",
 		"events:transaction.delivered",
 		"events:transaction.completed",
+		"events:transaction.refunded",
 		"events:rating.submitted",
 		"events:dispute.opened",
+		"events:match.found",
+		"events:message.received",
+		"events:agent.registered",
+		"events:agent.claimed",
 	}
 
 	// Build stream args
@@ -224,7 +249,97 @@ func (w *Worker) processAuctions(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			w.startScheduledAuctions(ctx)
+			w.notifyAuctionsEndingSoon(ctx)
 			w.endExpiredAuctions(ctx)
+		}
+	}
+}
+
+// notifyAuctionsEndingSoon publishes auction.ending_soon for auctions approaching their end time.
+func (w *Worker) notifyAuctionsEndingSoon(ctx context.Context) {
+	status := auction.AuctionStatusActive
+	result, err := w.auctionRepo.SearchAuctions(ctx, auction.SearchAuctionsParams{
+		Status: &status,
+		Limit:  200,
+	})
+	if err != nil {
+		log.Printf("Worker: Failed to search active auctions for ending_soon: %v", err)
+		return
+	}
+
+	now := time.Now().UTC()
+	threshold := 5 * time.Minute
+
+	for _, auc := range result.Auctions {
+		if auc.EndsAt.Before(now) {
+			continue
+		}
+
+		remaining := auc.EndsAt.Sub(now)
+		if remaining > threshold {
+			continue
+		}
+
+		if w.redis == nil {
+			continue
+		}
+
+		key := fmt.Sprintf("auction:%s:ending_soon", auc.ID)
+		ok, err := w.redis.SetNX(ctx, key, "1", remaining+time.Minute).Result()
+		if err != nil {
+			log.Printf("Worker: Failed to set ending_soon key for auction %s: %v", auc.ID, err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+
+		if w.notificationService != nil {
+			_ = w.notificationService.Publish(ctx, "auction.ending_soon", map[string]any{
+				"auction_id":   auc.ID,
+				"seller_id":    auc.SellerID,
+				"auction_type": auc.AuctionType,
+				"title":        auc.Title,
+				"ends_at":      auc.EndsAt,
+			})
+		}
+	}
+}
+
+// startScheduledAuctions activates auctions whose start time has passed.
+func (w *Worker) startScheduledAuctions(ctx context.Context) {
+	status := auction.AuctionStatusScheduled
+	result, err := w.auctionRepo.SearchAuctions(ctx, auction.SearchAuctionsParams{
+		Status: &status,
+		Limit:  100,
+	})
+	if err != nil {
+		log.Printf("Worker: Failed to search scheduled auctions: %v", err)
+		return
+	}
+
+	now := time.Now().UTC()
+	for _, auc := range result.Auctions {
+		if auc.StartsAt.After(now) {
+			continue
+		}
+
+		if err := w.auctionRepo.UpdateAuctionStatus(ctx, auc.ID, auction.AuctionStatusActive); err != nil {
+			log.Printf("Worker: Failed to activate auction %s: %v", auc.ID, err)
+			continue
+		}
+
+		// Publish event now that the auction is active
+		if w.notificationService != nil {
+			_ = w.notificationService.Publish(ctx, "auction.started", map[string]any{
+				"auction_id":     auc.ID,
+				"seller_id":      auc.SellerID,
+				"auction_type":   auc.AuctionType,
+				"title":          auc.Title,
+				"starting_price": auc.StartingPrice,
+				"ends_at":        auc.EndsAt,
+			})
 		}
 	}
 }
@@ -270,6 +385,28 @@ func (w *Worker) endExpiredAuctions(ctx context.Context) {
 				}
 			} else {
 				w.auctionRepo.UpdateAuctionStatus(ctx, auc.ID, auction.AuctionStatusEnded)
+			}
+		}
+	}
+}
+
+// processEmailQueue processes the email queue periodically.
+func (w *Worker) processEmailQueue(ctx context.Context) {
+	if w.emailService == nil {
+		log.Printf("Worker: Email service not configured, skipping email queue processing")
+		return
+	}
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := w.emailService.ProcessQueue(ctx); err != nil {
+				log.Printf("Worker: Failed to process email queue: %v", err)
 			}
 		}
 	}

@@ -2,27 +2,26 @@ package trust
 
 import "math"
 
-// Trust score constants
+// Trust score constants (0-100% scale, stored as 0.0-1.0)
 const (
-	BaseTrustScore          = 0.5
-	MaxTrustScore           = 1.0
-	OwnershipTrustScore     = 1.0  // Claimed agents get instant max trust
-	TwitterTrustBonus       = 0.15
-	MaxTransactionTrustBonus = 0.25
-	MaxRatingTrustBonus     = 0.10
-	TransactionDecayRate    = 0.05
-	MinRatingsForBonus      = 5
+	BaseTrustScore           = 0.0  // New agents start at 0%
+	MaxTrustScore            = 1.0  // 100% max
+	HumanLinkBonus           = 0.10 // +10% for linking to human owner
+	TwitterTrustBonus        = 0.15 // +15% for Twitter verification
+	MaxTransactionTrustBonus = 0.75 // +75% max from successful transactions
+	TransactionDecayRate     = 0.03 // Slower decay for more gradual growth
 )
 
 // TransactionTrustBonus calculates trust from successful transactions using exponential decay.
 // Formula: bonus = maxBonus * (1 - e^(-decayRate * transactions))
 // This gives diminishing returns: early transactions worth more, later ones worth less.
 //
-// Example values:
-//   - 1 transaction:   +0.01
-//   - 10 transactions: +0.10
-//   - 50 transactions: +0.23
-//   - 100 transactions: +0.25 (approaching max)
+// Example values (with 75% max, 0.03 decay):
+//   - 1 transaction:   +2%
+//   - 10 transactions: +22%
+//   - 25 transactions: +42%
+//   - 50 transactions: +55%
+//   - 100 transactions: +70%
 func TransactionTrustBonus(successfulTransactions int) float64 {
 	if successfulTransactions <= 0 {
 		return 0
@@ -32,29 +31,17 @@ func TransactionTrustBonus(successfulTransactions int) float64 {
 	return roundTo4Decimals(bonus)
 }
 
-// RatingTrustBonus calculates trust from average rating.
-// Only applies after minimum number of ratings (5).
-// Rating of 3.0 or below gives 0 bonus.
-// Rating of 5.0 gives maximum bonus (0.10).
-func RatingTrustBonus(averageRating float64, ratingCount int) float64 {
-	if ratingCount < MinRatingsForBonus || averageRating <= 3.0 {
-		return 0
-	}
-
-	// Scale from 3.0 (0 bonus) to 5.0 (max bonus)
-	// (rating - 3.0) / 2.0 gives 0 to 1 range
-	bonus := MaxRatingTrustBonus * ((averageRating - 3.0) / 2.0)
-	return math.Min(MaxRatingTrustBonus, roundTo4Decimals(bonus))
-}
-
 // CalculateTotalTrustScore computes the total trust score from components.
-// If isOwnerClaimed is true, returns instant max trust (1.0).
-func CalculateTotalTrustScore(isOwnerClaimed bool, verificationBonus, transactionBonus, ratingBonus float64) float64 {
+// Trust = Base (0%) + Human Link (+10%) + Verifications (+15%) + Transactions (up to +75%)
+// Max possible: 100%
+func CalculateTotalTrustScore(isOwnerClaimed bool, verificationBonus, transactionBonus float64) float64 {
+	total := BaseTrustScore + transactionBonus + verificationBonus
+
+	// Human-linked agents get +10% bonus
 	if isOwnerClaimed {
-		return OwnershipTrustScore
+		total += HumanLinkBonus
 	}
 
-	total := BaseTrustScore + verificationBonus + transactionBonus + ratingBonus
 	return math.Min(MaxTrustScore, roundTo4Decimals(total))
 }
 

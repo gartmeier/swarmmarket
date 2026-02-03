@@ -11,14 +11,17 @@ type EventType string
 
 const (
 	// Request/Offer events
-	EventRequestCreated  EventType = "request.created"
-	EventOfferReceived   EventType = "offer.received"
-	EventOfferAccepted   EventType = "offer.accepted"
-	EventOfferRejected   EventType = "offer.rejected"
+	EventRequestCreated EventType = "request.created"
+	EventRequestUpdated EventType = "request.updated"
+	EventOfferReceived  EventType = "offer.received"
+	EventOfferAccepted  EventType = "offer.accepted"
+	EventOfferRejected  EventType = "offer.rejected"
 
 	// Listing events
-	EventListingCreated EventType = "listing.created"
-	EventListingUpdated EventType = "listing.updated"
+	EventListingCreated   EventType = "listing.created"
+	EventListingUpdated   EventType = "listing.updated"
+	EventListingPurchased EventType = "listing.purchased"
+	EventCommentCreated   EventType = "comment.created"
 
 	// Auction events
 	EventAuctionStarted    EventType = "auction.started"
@@ -28,22 +31,37 @@ const (
 	EventAuctionEnded      EventType = "auction.ended"
 
 	// Order/Transaction events
-	EventOrderCreated      EventType = "order.created"
-	EventEscrowFunded      EventType = "escrow.funded"
-	EventDeliveryConfirmed EventType = "delivery.confirmed"
-	EventPaymentReleased   EventType = "payment.released"
-	EventDisputeOpened     EventType = "dispute.opened"
+	EventOrderCreated            EventType = "order.created"
+	EventEscrowFunded            EventType = "escrow.funded"
+	EventDeliveryConfirmed       EventType = "delivery.confirmed"
+	EventPaymentReleased         EventType = "payment.released"
+	EventPaymentFailed           EventType = "payment.failed"
+	EventPaymentCaptureFailed    EventType = "payment.capture_failed"
+	EventDisputeOpened           EventType = "dispute.opened"
+	EventTransactionCreated      EventType = "transaction.created"
+	EventTransactionEscrowFunded EventType = "transaction.escrow_funded"
+	EventTransactionDelivered    EventType = "transaction.delivered"
+	EventTransactionCompleted    EventType = "transaction.completed"
+	EventTransactionRefunded     EventType = "transaction.refunded"
 
 	// Matching events (NYSE-style)
-	EventMatchFound EventType = "match.found"
+	EventMatchFound  EventType = "match.found"
 	EventOrderFilled EventType = "order.filled"
+
+	// Message events
+	EventMessageReceived EventType = "message.received"
+	EventMessageRead     EventType = "message.read"
+
+	// Agent events
+	EventAgentRegistered EventType = "agent.registered"
+	EventAgentClaimed    EventType = "agent.claimed"
 )
 
 // Event represents a notification event.
 type Event struct {
 	ID        uuid.UUID      `json:"id"`
 	Type      EventType      `json:"type"`
-	AgentID   uuid.UUID      `json:"agent_id"`   // Who should receive this
+	AgentID   uuid.UUID      `json:"agent_id"` // Who should receive this
 	Payload   map[string]any `json:"payload"`
 	CreatedAt time.Time      `json:"created_at"`
 }

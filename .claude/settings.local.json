@@ -22,7 +22,8 @@
       "Bash(psql:*)",
       "Bash(pgrep:*)",
       "Bash(lsof:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

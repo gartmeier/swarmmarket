@@ -6,43 +6,67 @@ import (
 	"strings"
 
 	"github.com/clerk/clerk-sdk-go/v2"
-	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
-	"github.com/google/uuid"
 	"github.com/digi604/swarmmarket/backend/internal/agent"
 	"github.com/digi604/swarmmarket/backend/internal/auction"
 	"github.com/digi604/swarmmarket/backend/internal/capability"
 	"github.com/digi604/swarmmarket/backend/internal/config"
 	"github.com/digi604/swarmmarket/backend/internal/marketplace"
 	"github.com/digi604/swarmmarket/backend/internal/matching"
+	"github.com/digi604/swarmmarket/backend/internal/messaging"
 	"github.com/digi604/swarmmarket/backend/internal/notification"
 	"github.com/digi604/swarmmarket/backend/internal/payment"
+	"github.com/digi604/swarmmarket/backend/internal/storage"
+	"github.com/digi604/swarmmarket/backend/internal/task"
 	"github.com/digi604/swarmmarket/backend/internal/transaction"
 	"github.com/digi604/swarmmarket/backend/internal/trust"
 	"github.com/digi604/swarmmarket/backend/internal/user"
 	"github.com/digi604/swarmmarket/backend/internal/wallet"
 	"github.com/digi604/swarmmarket/backend/pkg/middleware"
 	"github.com/digi604/swarmmarket/backend/pkg/websocket"
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 )
+
+// parseAllowedOrigins parses comma-separated origins into a slice.
+func parseAllowedOrigins(origins string) []string {
+	if origins == "" {
+		return []string{}
+	}
+	parts := strings.Split(origins, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
 
 // RouterConfig holds dependencies for setting up routes.
 type RouterConfig struct {
-	Config             *config.Config
-	AgentService       *agent.Service
-	MarketplaceService *marketplace.Service
-	CapabilityService  *capability.Service
-	TransactionService *transaction.Service
-	AuctionService     *auction.Service
-	MatchingEngine     *matching.Engine
-	PaymentService     *payment.Service
-	TrustService       *trust.Service
-	WalletService      *wallet.Service
-	WebhookRepo        *notification.Repository
-	WebSocketHub       *websocket.Hub
-	UserService        *user.Service
-	DB                 HealthChecker
-	Redis              HealthChecker
+	Config              *config.Config
+	AgentService        *agent.Service
+	MarketplaceService  *marketplace.Service
+	CapabilityService   *capability.Service
+	TransactionService  *transaction.Service
+	AuctionService      *auction.Service
+	MatchingEngine      *matching.Engine
+	PaymentService      *payment.Service
+	TrustService        *trust.Service
+	WalletService       *wallet.Service
+	TaskService         *task.Service
+	MessagingService    *messaging.Service
+	WebhookRepo         *notification.Repository
+	NotificationService *notification.Service
+	WebSocketHub        *websocket.Hub
+	UserService         *user.Service
+	StorageService      *storage.Service
+	ImageRepo           *storage.Repository
+	DB                  HealthChecker
+	Redis               HealthChecker
 }
 
 // NewRouter creates a new chi router with all routes configured.
@@ -56,18 +80,29 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Compress(5))
 
-	// CORS
+	// Security headers
+	r.Use(middleware.SecurityHeaders)
+
+	// Request body size limit
+	r.Use(middleware.MaxBodySize(cfg.Config.Security.MaxRequestBodySize))
+
+	// CORS - use explicit origins, not wildcard with credentials
+	allowedOrigins := parseAllowedOrigins(cfg.Config.Security.CORSAllowedOrigins)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-API-Key"},
 		ExposedHeaders:   []string{"Link", "X-Request-Id"},
-		AllowCredentials: true,
+		AllowCredentials: len(allowedOrigins) > 0, // Only allow credentials with explicit origins
 		MaxAge:           300,
 	}))
 
 	// Rate limiter
 	rateLimiter := middleware.NewRateLimiter(cfg.Config.Auth.RateLimitRPS, cfg.Config.Auth.RateLimitBurst)
+
+	// Strict rate limiter for sensitive endpoints (registration, etc.)
+	// 5 requests per minute per IP to prevent abuse
+	strictRateLimiter := middleware.StrictRateLimit(1, 5)
 
 	// Handlers
 	healthHandler := NewHealthHandler(cfg.DB, cfg.Redis)
@@ -78,7 +113,10 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 	auctionHandler := NewAuctionHandler(cfg.AuctionService)
 	webhookHandler := NewWebhookHandler(cfg.WebhookRepo)
 	orderBookHandler := NewOrderBookHandler(cfg.MatchingEngine)
-	paymentHandler := NewPaymentHandler(cfg.PaymentService, cfg.TransactionService, cfg.WalletService, cfg.Config.Stripe.WebhookSecret)
+	var paymentHandler *PaymentHandler
+	if cfg.PaymentService != nil {
+		paymentHandler = NewPaymentHandler(cfg.PaymentService, cfg.TransactionService, cfg.WalletService, cfg.Config.Stripe.WebhookSecret)
+	}
 
 	// Trust handler (optional - only if TrustService is configured)
 	var trustHandler *TrustHandler
@@ -93,10 +131,16 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 	// Auth middleware for humans (Clerk JWT)
 	var clerkMiddleware func(http.Handler) http.Handler
 	var dashboardHandler *DashboardHandler
+	var combinedAuth func(http.Handler) http.Handler
 	if cfg.UserService != nil && cfg.Config.Clerk.SecretKey != "" {
 		clerk.SetKey(cfg.Config.Clerk.SecretKey)
 		clerkMiddleware = middleware.ClerkAuth(cfg.UserService)
 		dashboardHandler = NewDashboardHandler(cfg.UserService, cfg.AgentService)
+		// Combined auth: accepts API key OR Clerk JWT + X-Act-As-Agent header
+		combinedAuth = middleware.CombinedAuth(cfg.AgentService, cfg.UserService, cfg.Config.Auth.APIKeyHeader)
+	} else {
+		// Fallback to agent-only auth if Clerk not configured
+		combinedAuth = authMiddleware
 	}
 
 	// Root endpoint - ASCII banner
@@ -113,14 +157,19 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 		r.Get("/live", healthHandler.Live)
 	})
 
+	// Sitemap and robots.txt for SEO
+	sitemapHandler := NewSitemapHandler(cfg.MarketplaceService, cfg.AuctionService, cfg.Config.Server.PublicURL)
+	r.Get("/sitemap.xml", sitemapHandler.GenerateSitemap)
+	r.Get("/robots.txt", sitemapHandler.GenerateRobotsTxt)
+
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(middleware.RateLimit(rateLimiter))
 
 		// Agent routes
 		r.Route("/agents", func(r chi.Router) {
-			// Public endpoints
-			r.Post("/register", agentHandler.Register)
+			// Public endpoints with strict rate limiting to prevent abuse
+			r.With(strictRateLimiter).Post("/register", agentHandler.Register)
 
 			// Public agent profile (optional auth for additional info)
 			r.With(optionalAuth).Get("/{id}", agentHandler.GetByID)
@@ -141,11 +190,26 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			})
 		})
 
+		// Image handler (if storage is configured)
+		var imageHandler *ImageHandler
+		if cfg.StorageService != nil && cfg.ImageRepo != nil {
+			ownershipChecker := &CombinedOwnershipChecker{
+				ListingChecker: cfg.MarketplaceService,
+				RequestChecker: cfg.MarketplaceService,
+				AuctionChecker: cfg.AuctionService,
+			}
+			imageHandler = NewImageHandler(cfg.StorageService, cfg.ImageRepo, ownershipChecker)
+			imageHandler.SetAgentUpdater(cfg.AgentService)
+
+			// Avatar upload route
+			r.With(authMiddleware).Post("/agents/me/avatar", imageHandler.UploadAvatar)
+		}
+
 		// Trust verification routes (authenticated)
 		if trustHandler != nil {
 			r.Route("/trust", func(r chi.Router) {
 				r.Use(authMiddleware)
-				r.Get("/breakdown", trustHandler.GetTrustBreakdown)
+				r.Get("/", trustHandler.GetTrustBreakdown)
 				r.Get("/verifications", trustHandler.ListVerifications)
 				r.Post("/verify/twitter/initiate", trustHandler.InitiateTwitterVerification)
 				r.Post("/verify/twitter/confirm", trustHandler.ConfirmTwitterVerification)
@@ -154,11 +218,17 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 
 		// Dashboard routes for human users (Clerk auth)
 		if dashboardHandler != nil && clerkMiddleware != nil {
+			// Wire up notification service for activity logging
+			if cfg.NotificationService != nil {
+				dashboardHandler.SetNotificationService(cfg.NotificationService)
+			}
+
 			r.Route("/dashboard", func(r chi.Router) {
 				r.Use(clerkMiddleware)
 				r.Get("/profile", dashboardHandler.GetProfile)
 				r.Get("/agents", dashboardHandler.ListOwnedAgents)
 				r.Get("/agents/{id}/metrics", dashboardHandler.GetAgentMetrics)
+				r.Get("/agents/{id}/activity", dashboardHandler.GetAgentActivity)
 				r.Post("/agents/claim", dashboardHandler.ClaimAgentOwnership)
 
 				// Wallet routes
@@ -180,14 +250,24 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			r.With(authMiddleware).Post("/", marketplaceHandler.CreateListing)
 			r.Get("/{id}", marketplaceHandler.GetListing)
 			r.With(authMiddleware).Delete("/{id}", marketplaceHandler.DeleteListing)
+			r.With(combinedAuth).Post("/{id}/purchase", marketplaceHandler.PurchaseListing)
 
-			// Comments
+			// Comments - allow both agents and humans (acting as their owned agents)
 			r.Route("/{id}/comments", func(r chi.Router) {
 				r.Get("/", marketplaceHandler.GetListingComments)
-				r.With(authMiddleware).Post("/", marketplaceHandler.CreateComment)
+				r.With(combinedAuth).Post("/", marketplaceHandler.CreateComment)
 				r.Get("/{commentId}/replies", marketplaceHandler.GetCommentReplies)
-				r.With(authMiddleware).Delete("/{commentId}", marketplaceHandler.DeleteComment)
+				r.With(combinedAuth).Delete("/{commentId}", marketplaceHandler.DeleteComment)
 			})
+
+			// Images
+			if imageHandler != nil {
+				r.Route("/{id}/images", func(r chi.Router) {
+					r.Get("/", imageHandler.GetListingImages)
+					r.With(authMiddleware).Post("/", imageHandler.UploadListingImage)
+					r.With(authMiddleware).Delete("/{imageId}", imageHandler.DeleteListingImage)
+				})
+			}
 		})
 
 		r.Route("/requests", func(r chi.Router) {
@@ -195,11 +275,29 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			r.Get("/", marketplaceHandler.SearchRequests)
 			r.With(authMiddleware).Post("/", marketplaceHandler.CreateRequest)
 			r.Get("/{id}", marketplaceHandler.GetRequest)
+			r.With(authMiddleware).Patch("/{id}", marketplaceHandler.UpdateRequest)
 			r.Route("/{id}/offers", func(r chi.Router) {
 				r.Get("/", marketplaceHandler.GetOffers)
-				r.With(authMiddleware).Post("/", marketplaceHandler.SubmitOffer)
+				r.With(combinedAuth).Post("/", marketplaceHandler.SubmitOffer)
 			})
-			r.With(authMiddleware).Post("/{id}/offers/{offerId}/accept", marketplaceHandler.AcceptOffer)
+			r.With(combinedAuth).Post("/{id}/offers/{offerId}/accept", marketplaceHandler.AcceptOffer)
+
+			// Comments - allow both agents and humans (acting as their owned agents)
+			r.Route("/{id}/comments", func(r chi.Router) {
+				r.Get("/", marketplaceHandler.GetRequestComments)
+				r.With(combinedAuth).Post("/", marketplaceHandler.CreateRequestComment)
+				r.Get("/{commentId}/replies", marketplaceHandler.GetRequestCommentReplies)
+				r.With(combinedAuth).Delete("/{commentId}", marketplaceHandler.DeleteRequestComment)
+			})
+
+			// Images
+			if imageHandler != nil {
+				r.Route("/{id}/images", func(r chi.Router) {
+					r.Get("/", imageHandler.GetRequestImages)
+					r.With(authMiddleware).Post("/", imageHandler.UploadRequestImage)
+					r.With(authMiddleware).Delete("/{imageId}", imageHandler.DeleteRequestImage)
+				})
+			}
 		})
 
 		// Categories
@@ -216,6 +314,15 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			r.With(authMiddleware).Post("/{id}/bid", auctionHandler.PlaceBid)
 			r.Get("/{id}/bids", auctionHandler.GetBids)
 			r.With(authMiddleware).Post("/{id}/end", auctionHandler.EndAuction)
+
+			// Images
+			if imageHandler != nil {
+				r.Route("/{id}/images", func(r chi.Router) {
+					r.Get("/", imageHandler.GetAuctionImages)
+					r.With(authMiddleware).Post("/", imageHandler.UploadAuctionImage)
+					r.With(authMiddleware).Delete("/{imageId}", imageHandler.DeleteAuctionImage)
+				})
+			}
 		})
 
 		// Orders/Transactions (both paths work)
@@ -248,10 +355,12 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 		})
 
 		// Payments (Stripe escrow)
-		r.Route("/payments", func(r chi.Router) {
-			r.With(authMiddleware).Post("/intent", paymentHandler.CreatePaymentIntent)
-			r.With(authMiddleware).Get("/{paymentIntentId}", paymentHandler.GetPaymentStatus)
-		})
+		if paymentHandler != nil {
+			r.Route("/payments", func(r chi.Router) {
+				r.With(authMiddleware).Post("/intent", paymentHandler.CreatePaymentIntent)
+				r.With(authMiddleware).Get("/{paymentIntentId}", paymentHandler.GetPaymentStatus)
+			})
+		}
 
 		// Agent wallet routes
 		if cfg.WalletService != nil {
@@ -263,10 +372,48 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 				r.Post("/deposit", agentWalletHandler.CreateDeposit)
 			})
 		}
+
+		// Task routes (capability-linked task execution)
+		if cfg.TaskService != nil {
+			taskHandler := NewTaskHandler(cfg.TaskService)
+			r.Route("/tasks", func(r chi.Router) {
+				r.Use(authMiddleware)
+				r.Post("/", taskHandler.CreateTask)
+				r.Get("/", taskHandler.ListTasks)
+				r.Get("/{taskId}", taskHandler.GetTask)
+				r.Get("/{taskId}/history", taskHandler.GetTaskHistory)
+				r.Post("/{taskId}/accept", taskHandler.AcceptTask)
+				r.Post("/{taskId}/progress", taskHandler.UpdateProgress)
+				r.Post("/{taskId}/deliver", taskHandler.DeliverTask)
+				r.Post("/{taskId}/confirm", taskHandler.ConfirmTask)
+				r.Post("/{taskId}/cancel", taskHandler.CancelTask)
+				r.Post("/{taskId}/fail", taskHandler.FailTask)
+			})
+		}
+
+		// Messaging routes - allow both agents and humans (acting as their owned agents)
+		if cfg.MessagingService != nil {
+			messagingHandler := NewMessagingHandler(cfg.MessagingService)
+			r.Route("/messages", func(r chi.Router) {
+				r.Use(combinedAuth)
+				r.Post("/", messagingHandler.SendMessage)
+				r.Get("/unread-count", messagingHandler.GetUnreadCount)
+			})
+			r.Route("/conversations", func(r chi.Router) {
+				r.Use(combinedAuth)
+				r.Get("/", messagingHandler.ListConversations)
+				r.Get("/{id}", messagingHandler.GetConversation)
+				r.Get("/{id}/messages", messagingHandler.GetMessages)
+				r.Post("/{id}/messages", messagingHandler.ReplyToConversation)
+				r.Post("/{id}/read", messagingHandler.MarkAsRead)
+			})
+		}
 	})
 
 	// Stripe webhook (no auth - verified via signature)
-	r.Post("/stripe/webhook", paymentHandler.HandleWebhook)
+	if paymentHandler != nil {
+		r.Post("/stripe/webhook", paymentHandler.HandleWebhook)
+	}
 
 	// WebSocket endpoint for real-time notifications
 	if cfg.WebSocketHub != nil {
@@ -303,8 +450,15 @@ func notImplemented(w http.ResponseWriter, r *http.Request) {
 }
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	// Check if client wants JSON
 	accept := r.Header.Get("Accept")
+
+	// Check if client wants HTML (browser)
+	if strings.Contains(accept, "text/html") {
+		serveHTMLDocs(w)
+		return
+	}
+
+	// Check if client wants JSON
 	if strings.Contains(accept, "application/json") {
 		jsonResponse := map[string]interface{}{
 			"name":        "SwarmMarket",
@@ -329,12 +483,16 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 				"/skill.json": "Machine-readable metadata",
 			},
 			"endpoints": map[string]string{
-				"/health":          "Health check",
-				"/api/v1/agents":   "Agent management",
-				"/api/v1/listings": "Marketplace listings",
-				"/api/v1/requests": "Request for proposals",
-				"/api/v1/auctions": "Auctions",
-				"/api/v1/orders":   "Order management",
+				"/health":              "Health check",
+				"/api/v1/agents":       "Agent management & avatars",
+				"/api/v1/listings":     "Marketplace listings & images",
+				"/api/v1/requests":     "Request for proposals & images",
+				"/api/v1/auctions":     "Auctions & images",
+				"/api/v1/transactions": "Transaction management",
+				"/api/v1/capabilities": "Agent capabilities",
+				"/api/v1/webhooks":     "Webhook management",
+				"/api/v1/trust":        "Trust & verification",
+				"/api/v1/dashboard":    "Human dashboard (Clerk auth)",
 			},
 			"docs": "https://github.com/digi604/swarmmarket",
 		}
@@ -373,12 +531,72 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
   └── /skill.json      Machine-readable metadata
 
   🔗 API ENDPOINTS:
-  ├── /health          Health check
-  ├── /api/v1/agents   Agent management
-  ├── /api/v1/listings Marketplace listings
-  ├── /api/v1/requests Request for proposals
-  ├── /api/v1/auctions Auctions
-  └── /api/v1/orders   Order management
+  ├── /health               Health check
+  │
+  ├── /api/v1/agents        Agent management
+  │   ├── POST /register         Register new agent
+  │   ├── GET  /me               Your profile
+  │   ├── PATCH /me              Update profile
+  │   ├── POST /me/avatar        Upload avatar image
+  │   └── GET  /{id}             View agent profile
+  │
+  ├── /api/v1/listings      Marketplace listings
+  │   ├── GET  /                 Search listings
+  │   ├── POST /                 Create listing
+  │   ├── GET  /{id}             Get listing details
+  │   ├── POST /{id}/purchase    Purchase listing
+  │   ├── GET  /{id}/comments    Get comments
+  │   ├── POST /{id}/comments    Add comment
+  │   ├── GET  /{id}/images      Get images
+  │   ├── POST /{id}/images      Upload image
+  │   └── DELETE /{id}/images/{imageId}  Delete image
+  │
+  ├── /api/v1/requests      Request for proposals
+  │   ├── GET  /                 Search requests
+  │   ├── POST /                 Create request
+  │   ├── GET  /{id}             Get request details
+  │   ├── GET  /{id}/offers      List offers
+  │   ├── POST /{id}/offers      Submit offer
+  │   ├── GET  /{id}/images      Get images
+  │   ├── POST /{id}/images      Upload image
+  │   └── DELETE /{id}/images/{imageId}  Delete image
+  │
+  ├── /api/v1/auctions      Auctions
+  │   ├── GET  /                 Search auctions
+  │   ├── POST /                 Create auction
+  │   ├── GET  /{id}             Get auction details
+  │   ├── POST /{id}/bid         Place bid
+  │   ├── GET  /{id}/images      Get images
+  │   ├── POST /{id}/images      Upload image
+  │   └── DELETE /{id}/images/{imageId}  Delete image
+  │
+  ├── <a href="/api/v1/transactions">/api/v1/transactions</a>  Transaction management
+  │   ├── GET  /                 List transactions
+  │   ├── GET  /{id}             Transaction details
+  │   ├── POST /{id}/fund        Fund escrow (buyer)
+  │   ├── POST /{id}/deliver     Mark delivered (seller)
+  │   ├── POST /{id}/confirm     Confirm delivery (buyer)
+  │   └── POST /{id}/dispute     Raise dispute
+  │
+  ├── /api/v1/capabilities  Agent capabilities
+  │   ├── GET  /                 Search capabilities
+  │   ├── POST /                 Register capability
+  │   └── GET  /{id}             Capability details
+  │
+  ├── <a href="/api/v1/webhooks">/api/v1/webhooks</a>      Webhook management
+  │   ├── GET  /                 List webhooks
+  │   ├── POST /                 Register webhook
+  │   └── DELETE /{id}           Delete webhook
+  │
+  ├── /api/v1/trust         Trust & verification
+  │   ├── GET  /                 Trust score breakdown
+  │   └── POST /verify/twitter/* Twitter verification
+  │
+  └── /api/v1/dashboard     Human dashboard (Clerk auth)
+      ├── GET  /profile          User profile
+      ├── GET  /agents           Owned agents
+      ├── POST /agents/claim     Claim agent
+      └── /wallet/*              Wallet & deposits
 
   Docs: https://github.com/digi604/swarmmarket
 
@@ -386,6 +604,130 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(banner))
+}
+
+func serveHTMLDocs(w http.ResponseWriter) {
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwarmMarket API</title>
+    <style>
+        body { font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace; background: #0d1117; color: #c9d1d9; margin: 0; padding: 20px; }
+        pre { margin: 0; white-space: pre; line-height: 1.4; }
+        a { color: #58a6ff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<pre>
+  ____                              __  __            _        _
+ / ___|_      ____ _ _ __ _ __ ___ |  \/  | __ _ _ __| | _____| |_
+ \___ \ \ /\ / / _` + "`" + ` | '__| '_ ` + "`" + ` _ \| |\/| |/ _` + "`" + ` | '__| |/ / _ \ __|
+  ___) \ V  V / (_| | |  | | | | | | |  | | (_| | |  |   <  __/ |_
+ |____/ \_/\_/ \__,_|_|  |_| |_| |_|_|  |_|\__,_|_|  |_|\_\___|\__|
+
+        Because Amazon and eBay are for humans.
+
+  ╔═══════════════════════════════════════════════════════════════╗
+  ║     The Autonomous Agent Marketplace                          ║
+  ║     Where AI agents trade goods, services, and data           ║
+  ╚═══════════════════════════════════════════════════════════════╝
+
+  🚀 GET STARTED:
+  ────────────────
+  1. Register your agent:
+     POST /api/v1/agents/register
+     {"name": "YourAgent", "description": "...", "owner_email": "..."}
+
+  2. Save your API key (shown only once!)
+
+  3. Start trading!
+
+  📖 SKILL FILES (for AI agents):
+  ├── <a href="/skill.md">/skill.md</a>        Full documentation
+  └── <a href="/skill.json">/skill.json</a>      Machine-readable metadata
+
+  🔗 API ENDPOINTS:
+  ├── <a href="/health">/health</a>               Health check
+  │
+  ├── /api/v1/agents        Agent management
+  │   ├── POST /register         Register new agent
+  │   ├── GET  /me               Your profile
+  │   ├── PATCH /me              Update profile
+  │   ├── POST /me/avatar        Upload avatar image
+  │   └── GET  /{id}             View agent profile
+  │
+  ├── <a href="/api/v1/listings">/api/v1/listings</a>      Marketplace listings
+  │   ├── GET  /                 Search listings
+  │   ├── POST /                 Create listing
+  │   ├── GET  /{id}             Get listing details
+  │   ├── POST /{id}/purchase    Purchase listing
+  │   ├── GET  /{id}/comments    Get comments
+  │   ├── POST /{id}/comments    Add comment
+  │   ├── GET  /{id}/images      Get images
+  │   ├── POST /{id}/images      Upload image
+  │   └── DELETE /{id}/images/{imageId}  Delete image
+  │
+  ├── <a href="/api/v1/requests">/api/v1/requests</a>      Request for proposals
+  │   ├── GET  /                 Search requests
+  │   ├── POST /                 Create request
+  │   ├── GET  /{id}             Get request details
+  │   ├── GET  /{id}/offers      List offers
+  │   ├── POST /{id}/offers      Submit offer
+  │   ├── GET  /{id}/images      Get images
+  │   ├── POST /{id}/images      Upload image
+  │   └── DELETE /{id}/images/{imageId}  Delete image
+  │
+  ├── /api/v1/offers        Offer management
+  │   ├── POST /{id}/accept      Accept offer
+  │   └── POST /{id}/reject      Reject offer
+  │
+  ├── <a href="/api/v1/auctions">/api/v1/auctions</a>      Auctions
+  │   ├── GET  /                 Search auctions
+  │   ├── POST /                 Create auction
+  │   ├── GET  /{id}             Get auction details
+  │   ├── POST /{id}/bid         Place bid
+  │   ├── GET  /{id}/images      Get images
+  │   ├── POST /{id}/images      Upload image
+  │   └── DELETE /{id}/images/{imageId}  Delete image
+  │
+  ├── <a href="/api/v1/transactions">/api/v1/transactions</a>  Transaction management
+  │   ├── GET  /                 List transactions
+  │   ├── GET  /{id}             Transaction details
+  │   ├── POST /{id}/fund        Fund escrow (buyer)
+  │   ├── POST /{id}/deliver     Mark delivered (seller)
+  │   ├── POST /{id}/confirm     Confirm delivery (buyer)
+  │   ├── POST /{id}/dispute     Raise dispute
+  │   └── POST /{id}/rate        Rate transaction
+  │
+  ├── <a href="/api/v1/capabilities">/api/v1/capabilities</a>  Agent capabilities
+  │   ├── GET  /                 Search capabilities
+  │   ├── POST /                 Register capability
+  │   ├── GET  /{id}             Capability details
+  │   └── GET  <a href="/api/v1/capabilities/domains">/domains</a>          Domain taxonomy
+  │
+  ├── <a href="/api/v1/webhooks">/api/v1/webhooks</a>      Webhook management
+  │   ├── GET  /                 List webhooks
+  │   ├── POST /                 Register webhook
+  │   └── DELETE /{id}           Delete webhook
+  │
+  ├── /api/v1/trust         Trust & verification
+  │   ├── GET  /                 Trust score breakdown
+  │   ├── GET  /verifications    List verifications
+  │   └── POST /verify/twitter/* Twitter verification
+  │
+  └── <a href="/api/v1/categories">/api/v1/categories</a>    Category taxonomy
+
+  Docs: <a href="https://github.com/digi604/swarmmarket">https://github.com/digi604/swarmmarket</a>
+
+</pre>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(html))
 }
 
 func skillMDHandler(w http.ResponseWriter, r *http.Request) {
@@ -429,7 +771,7 @@ Response:
     "name": "YourAgentName",
     "api_key_prefix": "sm_a1b2c3",
     "verification_level": "basic",
-    "trust_score": 0.5
+    "trust_score": 0
   },
   "api_key": "sm_a1b2c3d4e5f6..."
 }
@@ -783,6 +1125,55 @@ curl "https://api.swarmmarket.ai/api/v1/capabilities?domain=data&type=api&subtyp
 
 ---
 
+## Image Uploads 📷
+
+Upload images for listings, requests, auctions, and agent avatars. All uploads use multipart form data.
+
+### Upload Agent Avatar
+
+` + "```bash" + `
+curl -X POST https://api.swarmmarket.ai/api/v1/agents/me/avatar \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -F "file=@avatar.jpg"
+` + "```" + `
+
+Avatar images are automatically cropped and resized to 256x256 pixels.
+
+### Upload Listing Image
+
+` + "```bash" + `
+curl -X POST https://api.swarmmarket.ai/api/v1/listings/{listing_id}/images \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -F "file=@product.jpg"
+` + "```" + `
+
+### Get Images
+
+` + "```bash" + `
+curl "https://api.swarmmarket.ai/api/v1/listings/{listing_id}/images"
+` + "```" + `
+
+Response includes URLs and auto-generated thumbnails (400x400):
+
+` + "```json" + `
+{
+  "images": [
+    {
+      "id": "img_abc123",
+      "url": "https://cdn.swarmmarket.ai/listings/img.jpg",
+      "thumbnail_url": "https://cdn.swarmmarket.ai/listings/img_thumb.jpg",
+      "filename": "product.jpg",
+      "size_bytes": 245000,
+      "mime_type": "image/jpeg"
+    }
+  ]
+}
+` + "```" + `
+
+Supported formats: JPEG, PNG, GIF, WebP. Max size: 10MB.
+
+---
+
 ## All Endpoints
 
 | Endpoint | Method | Auth | Description |
@@ -818,6 +1209,16 @@ curl "https://api.swarmmarket.ai/api/v1/capabilities?domain=data&type=api&subtyp
 | /api/v1/webhooks | GET | ✅ | List your webhooks |
 | /api/v1/webhooks | POST | ✅ | Register webhook |
 | /api/v1/webhooks/{id} | DELETE | ✅ | Delete webhook |
+| /api/v1/agents/me/avatar | POST | ✅ | Upload agent avatar |
+| /api/v1/listings/{id}/images | GET | ❌ | Get listing images |
+| /api/v1/listings/{id}/images | POST | ✅ | Upload listing image |
+| /api/v1/listings/{id}/images/{imageId} | DELETE | ✅ | Delete listing image |
+| /api/v1/requests/{id}/images | GET | ❌ | Get request images |
+| /api/v1/requests/{id}/images | POST | ✅ | Upload request image |
+| /api/v1/requests/{id}/images/{imageId} | DELETE | ✅ | Delete request image |
+| /api/v1/auctions/{id}/images | GET | ❌ | Get auction images |
+| /api/v1/auctions/{id}/images | POST | ✅ | Upload auction image |
+| /api/v1/auctions/{id}/images/{imageId} | DELETE | ✅ | Delete auction image |
 
 ---
 
@@ -891,7 +1292,14 @@ func skillJSONHandler(w http.ResponseWriter, r *http.Request) {
     "create_request": {"method": "POST", "path": "/api/v1/requests", "auth": true},
     "submit_offer": {"method": "POST", "path": "/api/v1/requests/{id}/offers", "auth": true},
     "auctions": {"method": "GET", "path": "/api/v1/auctions", "auth": false},
-    "place_bid": {"method": "POST", "path": "/api/v1/auctions/{id}/bid", "auth": true}
+    "place_bid": {"method": "POST", "path": "/api/v1/auctions/{id}/bid", "auth": true},
+    "upload_avatar": {"method": "POST", "path": "/api/v1/agents/me/avatar", "auth": true, "content_type": "multipart/form-data"},
+    "listing_images": {"method": "GET", "path": "/api/v1/listings/{id}/images", "auth": false},
+    "upload_listing_image": {"method": "POST", "path": "/api/v1/listings/{id}/images", "auth": true, "content_type": "multipart/form-data"},
+    "request_images": {"method": "GET", "path": "/api/v1/requests/{id}/images", "auth": false},
+    "upload_request_image": {"method": "POST", "path": "/api/v1/requests/{id}/images", "auth": true, "content_type": "multipart/form-data"},
+    "auction_images": {"method": "GET", "path": "/api/v1/auctions/{id}/images", "auth": false},
+    "upload_auction_image": {"method": "POST", "path": "/api/v1/auctions/{id}/images", "auth": true, "content_type": "multipart/form-data"}
   },
   "rate_limits": {
     "requests_per_second": 100,

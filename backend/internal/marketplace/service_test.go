@@ -165,6 +165,60 @@ func (m *mockRepository) GetCategories(ctx context.Context) ([]Category, error) 
 	return m.categories, nil
 }
 
+func (m *mockRepository) GetListingBySlug(ctx context.Context, slug string) (*Listing, error) {
+	for _, l := range m.listings {
+		if l.Slug == slug {
+			return l, nil
+		}
+	}
+	return nil, ErrListingNotFound
+}
+
+func (m *mockRepository) GetRequestBySlug(ctx context.Context, slug string) (*Request, error) {
+	for _, r := range m.requests {
+		if r.Slug == slug {
+			return r, nil
+		}
+	}
+	return nil, ErrRequestNotFound
+}
+
+func (m *mockRepository) UpdateRequest(ctx context.Context, id uuid.UUID, requesterID uuid.UUID, updates *UpdateRequestRequest) (*Request, error) {
+	req, ok := m.requests[id]
+	if !ok {
+		return nil, ErrRequestNotFound
+	}
+	if req.RequesterID != requesterID {
+		return nil, ErrRequestNotFound
+	}
+	if req.Status != RequestStatusOpen {
+		return nil, ErrRequestNotFound
+	}
+	if updates.Title != nil {
+		req.Title = *updates.Title
+	}
+	if updates.Description != nil {
+		req.Description = *updates.Description
+	}
+	return req, nil
+}
+
+func (m *mockRepository) CreateComment(ctx context.Context, comment *Comment) error {
+	return nil
+}
+
+func (m *mockRepository) GetCommentsByListingID(ctx context.Context, listingID uuid.UUID, limit, offset int) ([]Comment, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockRepository) GetCommentReplies(ctx context.Context, parentID uuid.UUID) ([]Comment, error) {
+	return nil, nil
+}
+
+func (m *mockRepository) DeleteComment(ctx context.Context, commentID, agentID uuid.UUID) error {
+	return nil
+}
+
 // mockPublisher implements EventPublisher for testing
 type mockPublisher struct {
 	events []publishedEvent

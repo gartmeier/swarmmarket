@@ -134,6 +134,23 @@ export interface Rating {
   created_at: string;
 }
 
+export interface ActivityEvent {
+  id: string;
+  event_type: string;
+  agent_id: string;
+  resource_type?: string;
+  resource_id?: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ActivityResponse {
+  events: ActivityEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface Listing {
   id: string;
   slug?: string;
@@ -249,6 +266,14 @@ export interface AuctionSearchParams {
   offset?: number;
 }
 
+export interface PurchaseResult {
+  transaction_id: string;
+  client_secret: string;
+  amount: number;
+  currency: string;
+  status: string;
+}
+
 class ApiClient {
   private getToken: (() => Promise<string | null>) | null = null;
 
@@ -297,6 +322,18 @@ class ApiClient {
 
   async getAgentMetrics(agentId: string): Promise<AgentMetrics> {
     return this.request<AgentMetrics>(`/api/v1/dashboard/agents/${agentId}/metrics`);
+  }
+
+  async getAgentActivity(
+    agentId: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<ActivityResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    const query = searchParams.toString();
+    const url = `/api/v1/dashboard/agents/${agentId}/activity${query ? `?${query}` : ''}`;
+    return this.request<ActivityResponse>(url);
   }
 
   async claimAgent(token: string): Promise<ClaimResult> {
@@ -478,6 +515,152 @@ class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // Listing purchase
+  async purchaseListing(listingId: string, quantity: number = 1): Promise<PurchaseResult> {
+    return this.request<PurchaseResult>(`/api/v1/listings/${listingId}/purchase`, {
+      method: 'POST',
+      body: JSON.stringify({ quantity }),
+    });
+  }
+
+  // Request comments
+  async getRequestComments(requestId: string, params?: { limit?: number; offset?: number }): Promise<{ comments: Comment[]; total: number }> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+
+    const query = searchParams.toString();
+    return this.request<{ comments: Comment[]; total: number }>(
+      `/api/v1/requests/${requestId}/comments${query ? `?${query}` : ''}`,
+      {},
+      false
+    );
+  }
+
+  async createRequestComment(requestId: string, content: string, parentId?: string): Promise<Comment> {
+    return this.request<Comment>(`/api/v1/requests/${requestId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content, parent_id: parentId }),
+    });
+  }
+
+  async getRequestCommentReplies(requestId: string, commentId: string): Promise<{ replies: Comment[] }> {
+    return this.request<{ replies: Comment[] }>(`/api/v1/requests/${requestId}/comments/${commentId}/replies`, {}, false);
+  }
+
+  // Image endpoints
+  async getListingImages(listingId: string): Promise<ImagesResponse> {
+    return this.request<ImagesResponse>(`/api/v1/listings/${listingId}/images`, {}, false);
+  }
+
+  async uploadListingImage(listingId: string, file: File): Promise<EntityImage> {
+    return this.uploadFile<EntityImage>(`/api/v1/listings/${listingId}/images`, file);
+  }
+
+  async deleteListingImage(listingId: string, imageId: string): Promise<void> {
+    return this.request<void>(`/api/v1/listings/${listingId}/images/${imageId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getRequestImages(requestId: string): Promise<ImagesResponse> {
+    return this.request<ImagesResponse>(`/api/v1/requests/${requestId}/images`, {}, false);
+  }
+
+  async uploadRequestImage(requestId: string, file: File): Promise<EntityImage> {
+    return this.uploadFile<EntityImage>(`/api/v1/requests/${requestId}/images`, file);
+  }
+
+  async deleteRequestImage(requestId: string, imageId: string): Promise<void> {
+    return this.request<void>(`/api/v1/requests/${requestId}/images/${imageId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getAuctionImages(auctionId: string): Promise<ImagesResponse> {
+    return this.request<ImagesResponse>(`/api/v1/auctions/${auctionId}/images`, {}, false);
+  }
+
+  async uploadAuctionImage(auctionId: string, file: File): Promise<EntityImage> {
+    return this.uploadFile<EntityImage>(`/api/v1/auctions/${auctionId}/images`, file);
+  }
+
+  async deleteAuctionImage(auctionId: string, imageId: string): Promise<void> {
+    return this.request<void>(`/api/v1/auctions/${auctionId}/images/${imageId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Avatar upload
+  async uploadAvatar(file: File): Promise<{ avatar_url: string }> {
+    return this.uploadFile<{ avatar_url: string }>('/api/v1/agents/me/avatar', file);
+  }
+
+  // Messaging endpoints
+  async sendMessage(req: SendMessageRequest): Promise<{ message: Message; conversation: Conversation }> {
+    return this.request<{ message: Message; conversation: Conversation }>('/api/v1/messages', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  async getConversations(limit: number = 20, offset: number = 0): Promise<ConversationsResponse> {
+    return this.request<ConversationsResponse>(`/api/v1/conversations?limit=${limit}&offset=${offset}`);
+  }
+
+  async getConversation(id: string): Promise<Conversation> {
+    return this.request<Conversation>(`/api/v1/conversations/${id}`);
+  }
+
+  async getMessages(conversationId: string, limit: number = 50, offset: number = 0): Promise<MessagesResponse> {
+    return this.request<MessagesResponse>(`/api/v1/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`);
+  }
+
+  async replyToConversation(conversationId: string, content: string): Promise<Message> {
+    return this.request<Message>(`/api/v1/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  }
+
+  async markConversationAsRead(conversationId: string): Promise<void> {
+    return this.request<void>(`/api/v1/conversations/${conversationId}/read`, {
+      method: 'POST',
+    });
+  }
+
+  async getUnreadCount(): Promise<{ unread_count: number }> {
+    return this.request<{ unread_count: number }>('/api/v1/messages/unread-count');
+  }
+
+  // File upload helper (uses FormData instead of JSON)
+  private async uploadFile<T>(endpoint: string, file: File): Promise<T> {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const headers: Record<string, string> = {};
+
+    if (this.getToken) {
+      const token = await this.getToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || error.message || 'Upload failed');
+    }
+
+    return response.json();
+  }
 }
 
 // Wallet types
@@ -507,6 +690,75 @@ export interface CreateDepositResponse {
   amount: number;
   currency: string;
   instructions: string;
+}
+
+// Image types
+export interface EntityImage {
+  id: string;
+  entity_type: 'listings' | 'requests' | 'auctions' | 'avatars';
+  entity_id: string;
+  url: string;
+  thumbnail_url?: string;
+  filename: string;
+  size: number;
+  mime_type: string;
+  created_at: string;
+}
+
+export interface ImagesResponse {
+  images: EntityImage[];
+  count: number;
+}
+
+// Messaging types
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  read_at?: string;
+  created_at: string;
+  updated_at: string;
+  sender_name?: string;
+  sender_avatar_url?: string;
+}
+
+export interface Conversation {
+  id: string;
+  participant_1_id: string;
+  participant_2_id: string;
+  listing_id?: string;
+  request_id?: string;
+  auction_id?: string;
+  last_message_at?: string;
+  created_at: string;
+  other_participant_id: string;
+  other_participant_name: string;
+  other_avatar_url?: string;
+  unread_count: number;
+  last_message?: Message;
+  listing_title?: string;
+  request_title?: string;
+  auction_title?: string;
+}
+
+export interface ConversationsResponse {
+  conversations: Conversation[];
+  total: number;
+  unread_total: number;
+}
+
+export interface MessagesResponse {
+  messages: Message[];
+  total: number;
+}
+
+export interface SendMessageRequest {
+  recipient_id: string;
+  content: string;
+  listing_id?: string;
+  request_id?: string;
+  auction_id?: string;
 }
 
 export const api = new ApiClient();

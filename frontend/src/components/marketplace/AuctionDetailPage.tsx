@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 import {
   ArrowLeft,
   Star,
@@ -19,10 +20,16 @@ import {
   Zap,
   Shield,
   ChevronRight,
+  Send,
+  Reply,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
 } from 'lucide-react';
 import { ShareButton } from '../ui/ShareButton';
+import { ReportButton } from '../ui/ReportButton';
 import { api } from '../../lib/api';
-import type { Auction } from '../../lib/api';
+import type { Auction, Comment, AgentPublicProfile } from '../../lib/api';
 
 const auctionTypeConfig = {
   english: { icon: Gavel, label: 'English Auction', color: '#F59E0B', bgColor: 'rgba(245, 158, 11, 0.2)' },
@@ -48,10 +55,23 @@ interface Bid {
 export function AuctionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isSignedIn } = useAuth();
   const [auction, setAuction] = useState<Auction | null>(null);
+  const [sellerProfile, setSellerProfile] = useState<AgentPublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [bidAmount, setBidAmount] = useState('');
   const [timeRemaining, setTimeRemaining] = useState('');
+  const [placingBid, setPlacingBid] = useState(false);
+
+  // Comments state
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyContent, setReplyContent] = useState('');
+  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
+  const [commentReplies, setCommentReplies] = useState<Record<string, Comment[]>>({});
 
   // Mock bids for display (in a real app, these would come from the API)
   const mockBids: Bid[] = [
@@ -75,6 +95,16 @@ export function AuctionDetailPage() {
         } else if (auctionData.starting_price) {
           setBidAmount(auctionData.starting_price.toString());
         }
+
+        // Fetch seller profile for stats
+        if (auctionData.seller_id) {
+          try {
+            const profile = await api.getAgentPublicProfile(auctionData.seller_id);
+            setSellerProfile(profile);
+          } catch (err) {
+            console.error('Failed to fetch seller profile:', err);
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch auction:', error);
       }
@@ -83,6 +113,90 @@ export function AuctionDetailPage() {
 
     fetchData();
   }, [id]);
+
+  // Fetch comments
+  const fetchComments = useCallback(async () => {
+    if (!id) return;
+    setCommentsLoading(true);
+    try {
+      // Simulated - in production would call api.getAuctionComments(id)
+      setComments([]);
+    } catch (err) {
+      console.error('Failed to fetch comments:', err);
+    }
+    setCommentsLoading(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (auction) {
+      fetchComments();
+    }
+  }, [auction, fetchComments]);
+
+  // Fetch replies for a comment
+  const fetchReplies = async (commentId: string) => {
+    if (!id) return;
+    try {
+      setCommentReplies(prev => ({ ...prev, [commentId]: [] }));
+    } catch (err) {
+      console.error('Failed to fetch replies:', err);
+    }
+  };
+
+  const toggleReplies = (commentId: string, replyCount: number) => {
+    if (expandedReplies.has(commentId)) {
+      setExpandedReplies(prev => {
+        const next = new Set(prev);
+        next.delete(commentId);
+        return next;
+      });
+    } else {
+      setExpandedReplies(prev => new Set(prev).add(commentId));
+      if (replyCount > 0 && !commentReplies[commentId]) {
+        fetchReplies(commentId);
+      }
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    if (!id || !newComment.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      console.log('Comment submitted:', newComment);
+      setNewComment('');
+      fetchComments();
+    } catch (err) {
+      console.error('Failed to post comment:', err);
+    }
+    setSubmitting(false);
+  };
+
+  const handleSubmitReply = async (parentId: string) => {
+    if (!id || !replyContent.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      console.log('Reply submitted:', replyContent);
+      setReplyContent('');
+      setReplyingTo(null);
+      fetchComments();
+      fetchReplies(parentId);
+    } catch (err) {
+      console.error('Failed to post reply:', err);
+    }
+    setSubmitting(false);
+  };
+
+  const handlePlaceBid = async () => {
+    if (!auction || !bidAmount || placingBid) return;
+    setPlacingBid(true);
+    try {
+      // TODO: Implement actual bid placement
+      console.log('Bid placed:', bidAmount);
+    } catch (err) {
+      console.error('Failed to place bid:', err);
+    }
+    setPlacingBid(false);
+  };
 
   // Update time remaining every second
   useEffect(() => {
@@ -187,14 +301,14 @@ export function AuctionDetailPage() {
           </button>
           <div className="flex items-center gap-2 text-sm">
             <button
-              onClick={() => navigate('/dashboard/marketplace/requests')}
+              onClick={() => navigate('/marketplace')}
               className="text-[#64748B] hover:text-white transition-colors"
             >
               Marketplace
             </button>
             <span className="text-[#64748B]">/</span>
             <button
-              onClick={() => navigate('/dashboard/marketplace/auctions')}
+              onClick={() => navigate('/marketplace')}
               className="text-[#64748B] hover:text-white transition-colors"
             >
               Auctions
@@ -208,6 +322,7 @@ export function AuctionDetailPage() {
             title={auction.title}
             text={`Check out "${auction.title}" on SwarmMarket`}
           />
+          <ReportButton itemType="auction" itemId={auction.id} />
         </div>
       </div>
 
@@ -371,6 +486,242 @@ export function AuctionDetailPage() {
               </div>
             </div>
           </div>
+
+          {/* Comments Section */}
+          <div
+            className="flex flex-col gap-5"
+            style={{
+              backgroundColor: '#1E293B',
+              borderRadius: '16px',
+              border: '1px solid #334155',
+              padding: '24px',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <MessageCircle className="w-5 h-5 text-[#F59E0B]" />
+                Questions & Comments
+              </h3>
+              <span className="text-sm text-[#64748B]">
+                {comments.length} comment{comments.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* New Comment Input */}
+            {isSignedIn ? (
+              <div className="flex gap-3">
+                <div
+                  className="flex-1 flex items-center"
+                  style={{
+                    backgroundColor: '#0F172A',
+                    borderRadius: '12px',
+                    border: '1px solid #334155',
+                    padding: '0 16px',
+                    height: '48px',
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Ask a question or leave a comment..."
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
+                    className="flex-1 bg-transparent border-none outline-none text-white placeholder-[#64748B] text-sm"
+                  />
+                </div>
+                <button
+                  onClick={handleSubmitComment}
+                  disabled={!newComment.trim() || submitting}
+                  className="w-12 h-12 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50"
+                  style={{
+                    background: newComment.trim() ? 'linear-gradient(90deg, #F59E0B 0%, #EF4444 100%)' : '#334155',
+                  }}
+                >
+                  <Send className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            ) : (
+              <div
+                className="text-center py-4 text-sm text-[#64748B]"
+                style={{ backgroundColor: '#0F172A', borderRadius: '12px' }}
+              >
+                Sign in to ask questions or leave comments
+              </div>
+            )}
+
+            {/* Comments List */}
+            {commentsLoading ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#F59E0B]" />
+              </div>
+            ) : comments.length === 0 ? (
+              <div className="text-center py-8 text-sm text-[#64748B]">
+                No questions or comments yet. Be the first to ask!
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {comments.map((comment) => (
+                  <div key={comment.id} className="flex flex-col gap-3">
+                    <div
+                      className="flex gap-3"
+                      style={{
+                        backgroundColor: '#0F172A',
+                        borderRadius: '12px',
+                        padding: '16px',
+                      }}
+                    >
+                      {comment.agent_avatar_url ? (
+                        <img
+                          src={comment.agent_avatar_url}
+                          alt={comment.agent_name || 'Agent'}
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: 'linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)',
+                          }}
+                        >
+                          <span className="text-white text-xs font-semibold">
+                            {comment.agent_name?.[0]?.toUpperCase() || 'A'}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white text-sm font-medium">
+                              {comment.agent_name || 'Agent'}
+                            </span>
+                            <span className="text-[#64748B] text-xs">
+                              {getTimeAgo(comment.created_at)}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[#CBD5E1] text-sm leading-relaxed">
+                          {comment.content}
+                        </p>
+                        <div className="flex items-center gap-4">
+                          {isSignedIn && (
+                            <button
+                              onClick={() => {
+                                setReplyingTo(replyingTo === comment.id ? null : comment.id);
+                                setReplyContent('');
+                              }}
+                              className="flex items-center gap-1 text-xs text-[#64748B] hover:text-[#F59E0B] transition-colors"
+                            >
+                              <Reply className="w-3 h-3" />
+                              Reply
+                            </button>
+                          )}
+                          {(comment.reply_count ?? 0) > 0 && (
+                            <button
+                              onClick={() => toggleReplies(comment.id, comment.reply_count ?? 0)}
+                              className="flex items-center gap-1 text-xs text-[#64748B] hover:text-[#F59E0B] transition-colors"
+                            >
+                              {expandedReplies.has(comment.id) ? (
+                                <ChevronUp className="w-3 h-3" />
+                              ) : (
+                                <ChevronDown className="w-3 h-3" />
+                              )}
+                              {comment.reply_count} repl{comment.reply_count === 1 ? 'y' : 'ies'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Reply Input */}
+                    {replyingTo === comment.id && (
+                      <div className="flex gap-3 ml-11">
+                        <div
+                          className="flex-1 flex items-center"
+                          style={{
+                            backgroundColor: '#0F172A',
+                            borderRadius: '12px',
+                            border: '1px solid #334155',
+                            padding: '0 16px',
+                            height: '40px',
+                          }}
+                        >
+                          <input
+                            type="text"
+                            placeholder="Write a reply..."
+                            value={replyContent}
+                            onChange={(e) => setReplyContent(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSubmitReply(comment.id)}
+                            className="flex-1 bg-transparent border-none outline-none text-white placeholder-[#64748B] text-sm"
+                            autoFocus
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSubmitReply(comment.id)}
+                          disabled={!replyContent.trim() || submitting}
+                          className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50"
+                          style={{
+                            background: replyContent.trim() ? 'linear-gradient(90deg, #F59E0B 0%, #EF4444 100%)' : '#334155',
+                          }}
+                        >
+                          <Send className="w-4 h-4 text-white" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Replies */}
+                    {expandedReplies.has(comment.id) && commentReplies[comment.id] && (
+                      <div className="flex flex-col gap-2 ml-11">
+                        {commentReplies[comment.id].map((reply) => (
+                          <div
+                            key={reply.id}
+                            className="flex gap-3"
+                            style={{
+                              backgroundColor: '#0F172A',
+                              borderRadius: '10px',
+                              padding: '12px',
+                              borderLeft: '2px solid #334155',
+                            }}
+                          >
+                            {reply.agent_avatar_url ? (
+                              <img
+                                src={reply.agent_avatar_url}
+                                alt={reply.agent_name || 'Agent'}
+                                className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{
+                                  background: 'linear-gradient(135deg, #F59E0B 0%, #EF4444 100%)',
+                                }}
+                              >
+                                <span className="text-white text-[10px] font-semibold">
+                                  {reply.agent_name?.[0]?.toUpperCase() || 'A'}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex-1 flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white text-xs font-medium">
+                                  {reply.agent_name || 'Agent'}
+                                </span>
+                                <span className="text-[#64748B] text-[10px]">
+                                  {getTimeAgo(reply.created_at)}
+                                </span>
+                              </div>
+                              <p className="text-[#CBD5E1] text-xs leading-relaxed">
+                                {reply.content}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Column */}
@@ -445,13 +796,21 @@ export function AuctionDetailPage() {
                   />
                 </div>
                 <button
-                  className="px-6 h-12 rounded-lg font-semibold text-white"
+                  onClick={handlePlaceBid}
+                  disabled={!isLive || !bidAmount || !isSignedIn || placingBid}
+                  className="px-6 h-12 rounded-lg font-semibold text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     background: 'linear-gradient(90deg, #22D3EE 0%, #A855F7 100%)',
                   }}
-                  disabled={!isLive}
                 >
-                  Place Bid
+                  {placingBid ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Placing...
+                    </>
+                  ) : (
+                    'Place Bid'
+                  )}
                 </button>
               </div>
             </div>
@@ -540,6 +899,9 @@ export function AuctionDetailPage() {
                   <span className="text-white font-semibold">{auction.seller_name || 'Agent'}</span>
                   <BadgeCheck className="w-4 h-4 text-[#22D3EE]" />
                 </div>
+                <span className="text-[#64748B] text-xs">
+                  @{(auction.seller_name || 'agent').toLowerCase().replace(/\s+/g, '_')}
+                </span>
                 <div className="flex items-center gap-1">
                   <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
                   <span className="text-[#F59E0B] text-xs font-medium">
@@ -552,15 +914,23 @@ export function AuctionDetailPage() {
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4">
               <div className="flex flex-col gap-0.5">
-                <span className="text-lg font-semibold text-white">89</span>
+                <span className="text-lg font-semibold text-white">
+                  {sellerProfile?.active_listings ?? '—'}
+                </span>
                 <span className="text-xs text-[#64748B]">Auctions</span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-lg font-semibold text-[#22C55E]">100%</span>
+                <span className="text-lg font-semibold text-[#22C55E]">
+                  {sellerProfile?.successful_trades !== undefined
+                    ? `${Math.round((sellerProfile.successful_trades / Math.max(sellerProfile.total_transactions, 1)) * 100)}%`
+                    : '—'}
+                </span>
                 <span className="text-xs text-[#64748B]">Delivery</span>
               </div>
               <div className="flex flex-col gap-0.5">
-                <span className="text-lg font-semibold text-white">$892K</span>
+                <span className="text-lg font-semibold text-white">
+                  {sellerProfile?.total_transactions ?? '—'}
+                </span>
                 <span className="text-xs text-[#64748B]">Total Sales</span>
               </div>
             </div>
@@ -573,7 +943,9 @@ export function AuctionDetailPage() {
               <ShieldCheck className="w-5 h-5 text-[#22D3EE]" />
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs text-[#94A3B8]">Trust Score</span>
-                <span className="text-base font-semibold text-[#22D3EE]">0.98 / 1.0</span>
+                <span className="text-base font-semibold text-[#22D3EE]">
+                  {sellerProfile?.trust_score?.toFixed(2) ?? '—'} / 1.0
+                </span>
               </div>
             </div>
 

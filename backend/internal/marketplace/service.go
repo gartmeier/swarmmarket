@@ -35,10 +35,12 @@ type ListingTransactionCreator interface {
 
 // Service handles marketplace business logic.
 type Service struct {
-	repo               RepositoryInterface
-	publisher          EventPublisher
-	transactionCreator TransactionCreator
-	walletChecker      WalletChecker
+	repo                      RepositoryInterface
+	publisher                 EventPublisher
+	transactionCreator        TransactionCreator
+	walletChecker             WalletChecker
+	paymentCreator            PaymentCreator
+	listingTransactionCreator ListingTransactionCreator
 }
 
 // NewService creates a new marketplace service.
@@ -57,6 +59,16 @@ func (s *Service) SetTransactionCreator(tc TransactionCreator) {
 // SetWalletChecker sets the wallet checker (to avoid circular dependency).
 func (s *Service) SetWalletChecker(wc WalletChecker) {
 	s.walletChecker = wc
+}
+
+// SetPaymentCreator sets the payment creator (to avoid circular dependency).
+func (s *Service) SetPaymentCreator(pc PaymentCreator) {
+	s.paymentCreator = pc
+}
+
+// SetListingTransactionCreator sets the listing transaction creator (to avoid circular dependency).
+func (s *Service) SetListingTransactionCreator(ltc ListingTransactionCreator) {
+	s.listingTransactionCreator = ltc
 }
 
 // --- Listings ---
@@ -130,6 +142,100 @@ func (s *Service) DeleteListing(ctx context.Context, id uuid.UUID, sellerID uuid
 	return s.repo.DeleteListing(ctx, id, sellerID)
 }
 
+// PurchaseListing handles direct purchase of a listing.
+func (s *Service) PurchaseListing(ctx context.Context, buyerID uuid.UUID, listingID uuid.UUID, quantity int) (*PurchaseResult, error) {
+	// Default quantity to 1
+	if quantity <= 0 {
+		quantity = 1
+	}
+
+	// Get the listing
+	listing, err := s.repo.GetListingByID(ctx, listingID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate listing is active
+	if listing.Status != ListingStatusActive {
+		return nil, fmt.Errorf("listing is not available for purchase")
+	}
+
+	// Validate buyer is not the seller
+	if listing.SellerID == buyerID {
+		return nil, fmt.Errorf("cannot purchase your own listing")
+	}
+
+	// Validate quantity is available
+	if quantity > listing.Quantity {
+		return nil, fmt.Errorf("requested quantity (%d) exceeds available quantity (%d)", quantity, listing.Quantity)
+	}
+
+	// Validate price is set
+	if listing.PriceAmount == nil || *listing.PriceAmount <= 0 {
+		return nil, fmt.Errorf("listing price is not set")
+	}
+
+	// Calculate total amount
+	totalAmount := *listing.PriceAmount * float64(quantity)
+	currency := listing.PriceCurrency
+	if currency == "" {
+		currency = "USD"
+	}
+
+	// Check if transaction creator is configured
+	if s.listingTransactionCreator == nil {
+		return nil, fmt.Errorf("transaction service not configured")
+	}
+
+	// Create transaction
+	transactionID, err := s.listingTransactionCreator.CreateFromListing(
+		ctx,
+		buyerID,
+		listing.SellerID,
+		&listingID,
+		totalAmount,
+		currency,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction: %w", err)
+	}
+
+	// Create payment intent if payment creator is configured
+	var clientSecret string
+	if s.paymentCreator != nil {
+		_, clientSecret, err = s.paymentCreator.CreateEscrowPayment(
+			ctx,
+			transactionID.String(),
+			buyerID.String(),
+			listing.SellerID.String(),
+			totalAmount,
+			currency,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create payment intent: %w", err)
+		}
+	}
+
+	// Publish event to notify seller
+	s.publishEvent(ctx, "listing.purchased", map[string]any{
+		"listing_id":     listingID,
+		"transaction_id": transactionID,
+		"buyer_id":       buyerID,
+		"seller_id":      listing.SellerID,
+		"quantity":       quantity,
+		"amount":         totalAmount,
+		"currency":       currency,
+	})
+
+	return &PurchaseResult{
+		TransactionID: transactionID,
+		ClientSecret:  clientSecret,
+		Amount:        totalAmount,
+		Currency:      currency,
+		Status:        "pending",
+	}, nil
+}
+
 // --- Requests ---
 
 // CreateRequest creates a new request (what an agent needs).
@@ -201,6 +307,37 @@ func (s *Service) GetRequestBySlug(ctx context.Context, slug string) (*Request, 
 // SearchRequests searches for open requests.
 func (s *Service) SearchRequests(ctx context.Context, params SearchRequestsParams) (*ListResult[Request], error) {
 	return s.repo.SearchRequests(ctx, params)
+}
+
+// UpdateRequest updates a request (only by the requester, only if still open).
+func (s *Service) UpdateRequest(ctx context.Context, requesterID uuid.UUID, requestID uuid.UUID, req *UpdateRequestRequest) (*Request, error) {
+	// Get existing request to verify ownership and status
+	existing, err := s.repo.GetRequestByID(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+
+	if existing.RequesterID != requesterID {
+		return nil, fmt.Errorf("not authorized to update this request")
+	}
+
+	if existing.Status != RequestStatusOpen {
+		return nil, fmt.Errorf("can only update open requests")
+	}
+
+	updated, err := s.repo.UpdateRequest(ctx, requestID, requesterID, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update request: %w", err)
+	}
+
+	// Publish event
+	s.publishEvent(ctx, "request.updated", map[string]any{
+		"request_id":   updated.ID,
+		"requester_id": updated.RequesterID,
+		"title":        updated.Title,
+	})
+
+	return updated, nil
 }
 
 // --- Offers ---
@@ -319,10 +456,13 @@ func (s *Service) AcceptOffer(ctx context.Context, requesterID uuid.UUID, offerI
 
 	// Notify the offerer that their offer was accepted
 	eventPayload := map[string]any{
-		"offer_id":     offer.ID,
-		"request_id":   offer.RequestID,
-		"offerer_id":   offer.OffererID,
-		"requester_id": request.RequesterID,
+		"offer_id":       offer.ID,
+		"request_id":     offer.RequestID,
+		"offerer_id":     offer.OffererID,
+		"requester_id":   request.RequesterID,
+		"price":          offer.PriceAmount,
+		"price_amount":   offer.PriceAmount,
+		"price_currency": offer.PriceCurrency,
 	}
 	if transactionID != nil {
 		eventPayload["transaction_id"] = *transactionID
@@ -356,7 +496,7 @@ func (s *Service) CreateComment(ctx context.Context, agentID, listingID uuid.UUI
 	now := time.Now().UTC()
 	comment := &Comment{
 		ID:        uuid.New(),
-		ListingID: listingID,
+		ListingID: &listingID,
 		AgentID:   agentID,
 		ParentID:  req.ParentID,
 		Content:   req.Content,
@@ -399,6 +539,85 @@ func (s *Service) GetCommentReplies(ctx context.Context, parentID uuid.UUID) ([]
 // DeleteComment deletes a comment.
 func (s *Service) DeleteComment(ctx context.Context, commentID, agentID uuid.UUID) error {
 	return s.repo.DeleteComment(ctx, commentID, agentID)
+}
+
+// --- Request Comments ---
+
+// CreateRequestComment creates a new comment on a request.
+func (s *Service) CreateRequestComment(ctx context.Context, agentID, requestID uuid.UUID, req *CreateCommentRequest) (*Comment, error) {
+	if req.Content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+
+	// Verify request exists
+	request, err := s.repo.GetRequestByID(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	comment := &Comment{
+		ID:        uuid.New(),
+		RequestID: &requestID,
+		AgentID:   agentID,
+		ParentID:  req.ParentID,
+		Content:   req.Content,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.repo.CreateRequestComment(ctx, comment); err != nil {
+		return nil, fmt.Errorf("failed to create comment: %w", err)
+	}
+
+	// Notify request owner of new comment
+	s.publishEvent(ctx, "request_comment.created", map[string]any{
+		"comment_id":   comment.ID,
+		"request_id":   requestID,
+		"requester_id": request.RequesterID,
+		"commenter_id": agentID,
+	})
+
+	return comment, nil
+}
+
+// GetRequestComments retrieves comments for a request.
+func (s *Service) GetRequestComments(ctx context.Context, requestID uuid.UUID, limit, offset int) (*CommentsResponse, error) {
+	comments, total, err := s.repo.GetCommentsByRequestID(ctx, requestID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return &CommentsResponse{Comments: comments, Total: total}, nil
+}
+
+// GetRequestCommentReplies retrieves replies to a request comment.
+func (s *Service) GetRequestCommentReplies(ctx context.Context, parentID uuid.UUID) ([]Comment, error) {
+	return s.repo.GetRequestCommentReplies(ctx, parentID)
+}
+
+// DeleteRequestComment deletes a request comment.
+func (s *Service) DeleteRequestComment(ctx context.Context, commentID, agentID uuid.UUID) error {
+	return s.repo.DeleteRequestComment(ctx, commentID, agentID)
+}
+
+// --- Ownership Checks ---
+
+// IsListingOwner checks if an agent owns a listing.
+func (s *Service) IsListingOwner(ctx context.Context, listingID, agentID uuid.UUID) (bool, error) {
+	listing, err := s.repo.GetListingByID(ctx, listingID)
+	if err != nil {
+		return false, err
+	}
+	return listing.SellerID == agentID, nil
+}
+
+// IsRequestOwner checks if an agent owns a request.
+func (s *Service) IsRequestOwner(ctx context.Context, requestID, agentID uuid.UUID) (bool, error) {
+	request, err := s.repo.GetRequestByID(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	return request.RequesterID == agentID, nil
 }
 
 // --- Helpers ---

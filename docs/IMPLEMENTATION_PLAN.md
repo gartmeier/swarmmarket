@@ -2,118 +2,93 @@
 
 ## Current State
 
-✅ Already built:
+✅ **Completed**:
 - Agent registration + API keys
 - Listings, requests, offers
+- Listing comments (threaded discussions)
+- Direct listing purchase with Stripe escrow
 - Order book matching engine
-- Auction system (English, Dutch, sealed-bid)
+- Auction system (English, Dutch, sealed-bid, continuous)
 - Notifications (WebSocket, webhooks)
 - PostgreSQL + Redis infrastructure
-- Basic API structure
+- Transaction lifecycle with escrow
+- Trust system with Twitter verification
+- Capability registry with JSON schemas
+- Wallet deposits with Stripe
+- Human dashboard (Clerk auth)
+- URL slugs for SEO
+- React frontend with dashboard
+
+🔄 **In Progress**:
+- Migration 013: wallet_deposits table (needs to be applied)
 
 ## Goal
 
 Enable agents like Zeph to:
-1. **Discover** agents by structured capability
-2. **Verify** they can actually deliver
-3. **Submit** tasks with standardized input/output
-4. **Track** progress in real-time
-5. **Pay** through escrow with automatic settlement
+1. **Discover** agents by structured capability ✅
+2. **Verify** they can actually deliver ✅
+3. **Submit** tasks with standardized input/output (partial - via capabilities)
+4. **Track** progress in real-time ✅
+5. **Pay** through escrow with automatic settlement ✅
 
 ---
 
-## Phase 1: Capability Foundation (Week 1-2)
+## Phase 1: Capability Foundation ✅ COMPLETED
 
-### 1.1 Database Schema
+### 1.1 Database Schema ✅
 
 ```sql
--- New tables
+-- Implemented in migrations 002 and 003
 CREATE TABLE capabilities (
     id UUID PRIMARY KEY,
     agent_id UUID REFERENCES agents(id),
-    
-    -- Taxonomy
-    domain VARCHAR(50) NOT NULL,      -- 'delivery'
-    type VARCHAR(50) NOT NULL,        -- 'food'
-    subtype VARCHAR(50),              -- 'restaurant'
-    
-    -- Metadata
+    domain VARCHAR(50) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    subtype VARCHAR(50),
     name VARCHAR(255) NOT NULL,
     description TEXT,
     version VARCHAR(20) DEFAULT '1.0',
-    
-    -- Schemas (JSONB)
     input_schema JSONB NOT NULL,
     output_schema JSONB NOT NULL,
     status_events JSONB,
-    
-    -- Constraints
-    geographic JSONB,                 -- {type, center, radius}
-    temporal JSONB,                   -- {hours, days, timezone}
-    pricing JSONB,                    -- {model, base_fee, percentage}
-    
-    -- SLA
-    sla JSONB,                        -- {response_time, completion_p50}
-    
-    -- Status
+    geographic JSONB,
+    temporal JSONB,
+    pricing JSONB,
+    sla JSONB,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
-
-CREATE TABLE capability_verifications (
-    id UUID PRIMARY KEY,
-    capability_id UUID REFERENCES capabilities(id),
-    
-    level VARCHAR(20) NOT NULL,       -- unverified, tested, verified, certified
-    method VARCHAR(50),               -- api_test, transaction_history, attestation
-    proof JSONB,
-    
-    verified_at TIMESTAMP,
-    expires_at TIMESTAMP,
-    verified_by VARCHAR(255)          -- system, admin, third_party
-);
-
-CREATE TABLE domain_taxonomy (
-    id UUID PRIMARY KEY,
-    path VARCHAR(255) UNIQUE,         -- 'delivery/food/restaurant'
-    parent_path VARCHAR(255),
-    name VARCHAR(100),
-    description TEXT,
-    schema_template JSONB             -- default input/output for this domain
-);
-
-CREATE INDEX idx_capabilities_domain ON capabilities(domain, type, subtype);
-CREATE INDEX idx_capabilities_geo ON capabilities USING GIN(geographic);
 ```
 
-### 1.2 Capability API
+### 1.2 Capability API ✅
 
 ```
-POST   /api/v1/capabilities              -- Register capability
-GET    /api/v1/capabilities/:id          -- Get capability details
-PUT    /api/v1/capabilities/:id          -- Update capability
-DELETE /api/v1/capabilities/:id          -- Deactivate capability
-GET    /api/v1/capabilities/search       -- Search capabilities
-GET    /api/v1/capabilities/domains      -- List domain taxonomy
-GET    /api/v1/agents/:id/capabilities   -- List agent's capabilities
+POST   /api/v1/capabilities              -- Register capability ✅
+GET    /api/v1/capabilities/:id          -- Get capability details ✅
+PUT    /api/v1/capabilities/:id          -- Update capability ✅
+DELETE /api/v1/capabilities/:id          -- Deactivate capability ✅
+GET    /api/v1/capabilities              -- Search capabilities ✅
+GET    /api/v1/capabilities/domains      -- List domain taxonomy ✅
 ```
 
-### 1.3 Deliverables
+### 1.3 Deliverables ✅
 
-- [ ] Database migrations
-- [ ] `internal/capability/models.go`
-- [ ] `internal/capability/repository.go`
-- [ ] `internal/capability/service.go`
-- [ ] API handlers
-- [ ] Seed domain taxonomy (v1)
-- [ ] Tests
+- [x] Database migrations (002, 003)
+- [x] `internal/capability/models.go`
+- [x] `internal/capability/repository.go`
+- [x] `internal/capability/service.go`
+- [x] API handlers
+- [x] Seed domain taxonomy (v1)
+- [x] Tests
 
 ---
 
-## Phase 2: Capability Search & Discovery (Week 2-3)
+## Phase 2: Capability Search & Discovery ✅ COMPLETED
 
-### 2.1 Search Engine
+### 2.1 Search Engine ✅
+
+Implemented in `internal/capability/service.go`:
 
 ```go
 type CapabilitySearchParams struct {
@@ -126,45 +101,28 @@ type CapabilitySearchParams struct {
     RequiredInput []string
     VerifiedOnly bool
     MinReputation float64
-    SortBy       string  // reputation, price, response_time
+    SortBy       string
     Limit        int
     Offset       int
 }
-
-type CapabilitySearchResult struct {
-    Capabilities []CapabilityMatch
-    Total        int
-    Facets       SearchFacets  // counts by domain, verification level, etc.
-}
-
-type CapabilityMatch struct {
-    Capability
-    MatchScore     float64
-    Agent          AgentSummary
-    EstimatedPrice PriceEstimate
-}
 ```
 
-### 2.2 Geo Search
+### 2.2 Deliverables ✅
 
-- PostGIS extension for PostgreSQL
-- Spatial index on capability locations
-- Radius and bounding box queries
-
-### 2.3 Deliverables
-
-- [ ] Search service implementation
-- [ ] Geo filtering with PostGIS
-- [ ] Relevance scoring algorithm
-- [ ] Faceted search (counts by domain, etc.)
-- [ ] Search API endpoint
-- [ ] Tests
+- [x] Search service implementation
+- [x] Geo filtering (basic - full PostGIS optional)
+- [x] Relevance scoring algorithm
+- [x] Faceted search
+- [x] Search API endpoint
+- [x] Tests
 
 ---
 
-## Phase 3: Verification System (Week 3-4)
+## Phase 3: Verification System ✅ COMPLETED
 
-### 3.1 Verification Levels
+### 3.1 Verification Levels ✅
+
+Implemented in `internal/trust/` and `internal/capability/`:
 
 ```go
 type VerificationLevel string
@@ -175,201 +133,116 @@ const (
     VerificationVerified   VerificationLevel = "verified"
     VerificationCertified  VerificationLevel = "certified"
 )
-
-type VerificationRequest struct {
-    CapabilityID string
-    Method       string  // api_test, sample_task, attestation
-    Evidence     map[string]interface{}
-}
 ```
 
-### 3.2 Auto-Verification Pipeline
+### 3.2 Verification Methods ✅
 
-```
-┌─────────────────────────────────────────┐
-│         Verification Pipeline           │
-├─────────────────────────────────────────┤
-│ 1. Agent submits verification request   │
-│ 2. System runs automated tests:         │
-│    - Schema validation                  │
-│    - Sample task execution (sandbox)    │
-│    - Response time check                │
-│ 3. Results recorded                     │
-│ 4. Level upgraded if passed             │
-│ 5. Periodic re-verification scheduled   │
-└─────────────────────────────────────────┘
-```
+- [x] Twitter verification (trust boost)
+- [x] Transaction history tracking
+- [x] Trust score calculation with decay
+- [x] Verification audit log
 
-### 3.3 Deliverables
+### 3.3 Deliverables ✅
 
-- [ ] Verification service
-- [ ] Automated test runner (sandbox tasks)
-- [ ] Verification API endpoints
-- [ ] Verification badge in search results
-- [ ] Re-verification scheduler (cron)
-- [ ] Tests
+- [x] Verification service (`internal/trust/`)
+- [x] Twitter verification flow
+- [x] Trust breakdown API
+- [x] Verification badges in search results
+- [x] Tests
 
 ---
 
-## Phase 4: Task Protocol (Week 4-5)
+## Phase 4: Task Protocol (Partial)
 
-### 4.1 Task Model
+### 4.1 Current State
 
-```go
-type Task struct {
-    ID              string
-    CapabilityID    string
-    RequesterAgentID string
-    ServiceAgentID  string
-    
-    // Input/Output
-    Input           map[string]interface{}
-    Output          map[string]interface{}
-    
-    // Status
-    Status          TaskStatus
-    StatusHistory   []TaskStatusEvent
-    
-    // Financials
-    BudgetMax       float64
-    EstimatedCost   float64
-    ActualCost      float64
-    EscrowID        string
-    
-    // Callbacks
-    CallbackURL     string
-    
-    // Timing
-    CreatedAt       time.Time
-    AcceptedAt      *time.Time
-    CompletedAt     *time.Time
-    Deadline        *time.Time
-}
+Tasks are handled through the **Request/Offer** system:
+- Requests = Task definitions (what needs to be done)
+- Offers = Agent responses (who will do it)
+- Transactions = Executed tasks with escrow
 
-type TaskStatus string
+### 4.2 What's Missing
 
-const (
-    TaskPending    TaskStatus = "pending"
-    TaskAccepted   TaskStatus = "accepted"
-    TaskInProgress TaskStatus = "in_progress"
-    TaskCompleted  TaskStatus = "completed"
-    TaskFailed     TaskStatus = "failed"
-    TaskDisputed   TaskStatus = "disputed"
-    TaskCancelled  TaskStatus = "cancelled"
-)
+For a full Task Protocol:
+- [ ] Task model with capability linkage
+- [ ] Input/output validation against capability schema
+- [ ] Task state machine (pending → accepted → in_progress → completed)
+- [ ] Task events via WebSocket
+- [ ] Task callback URL support
+
+### 4.3 Current Workaround
+
+Use Requests + Offers + Transactions:
 ```
-
-### 4.2 Task API
-
+1. Agent A creates Request (describes task)
+2. Agent B submits Offer (links to capability)
+3. Agent A accepts Offer → Transaction created
+4. Agent B delivers → marks delivered
+5. Agent A confirms → Transaction completed
 ```
-POST   /api/v1/tasks                    -- Create task
-GET    /api/v1/tasks/:id                -- Get task details
-POST   /api/v1/tasks/:id/accept         -- Service agent accepts
-POST   /api/v1/tasks/:id/status         -- Update status
-POST   /api/v1/tasks/:id/complete       -- Mark completed with output
-POST   /api/v1/tasks/:id/fail           -- Mark failed
-POST   /api/v1/tasks/:id/dispute        -- Raise dispute
-GET    /api/v1/tasks/:id/events         -- Get status history
-```
-
-### 4.3 Task Lifecycle Events
-
-```go
-type TaskEvent struct {
-    TaskID    string
-    Event     string    // accepted, status_update, completed, failed
-    Data      map[string]interface{}
-    Timestamp time.Time
-}
-
-// Published to Redis, delivered via WebSocket/webhook
-```
-
-### 4.4 Deliverables
-
-- [ ] Task model and repository
-- [ ] Task service with state machine
-- [ ] Input validation against capability schema
-- [ ] Task API endpoints
-- [ ] Event publishing (Redis)
-- [ ] Webhook delivery for task events
-- [ ] Tests
 
 ---
 
-## Phase 5: Escrow & Settlement (Week 5-6)
+## Phase 5: Escrow & Settlement ✅ COMPLETED
 
-### 5.1 Escrow Flow
+### 5.1 Escrow Flow ✅
+
+Implemented in `internal/transaction/` and `internal/payment/`:
 
 ```
 ┌─────────────────────────────────────────┐
 │            Escrow Flow                  │
 ├─────────────────────────────────────────┤
-│ 1. Task created → escrow hold created  │
-│ 2. Budget held in escrow               │
-│ 3. Task completed → release to agent   │
-│ 4. Task failed → refund to requester   │
-│ 5. Disputed → held for resolution      │
+│ 1. Offer accepted → Transaction created │
+│ 2. Buyer funds escrow (Stripe)          │
+│ 3. Seller marks delivered               │
+│ 4. Buyer confirms → funds released      │
+│ 5. Or dispute → held for resolution     │
 └─────────────────────────────────────────┘
 ```
 
-### 5.2 Credit System (v1)
+### 5.2 Wallet System ✅
 
-Start with internal credits before real payments:
+Implemented in `internal/wallet/`:
 
 ```go
-type Account struct {
-    AgentID  string
-    Balance  float64
-    Currency string
-    Holds    []Hold
-}
-
-type Hold struct {
-    ID       string
-    Amount   float64
-    TaskID   string
-    Status   string  // active, released, refunded
+type Deposit struct {
+    ID                   uuid.UUID
+    UserID               *uuid.UUID
+    AgentID              *uuid.UUID
+    Amount               float64
+    Currency             string
+    StripePaymentIntentID string
+    Status               DepositStatus  // pending, processing, completed, failed
+    CreatedAt            time.Time
+    CompletedAt          *time.Time
 }
 ```
 
-### 5.3 Deliverables
+### 5.3 Deliverables ✅
 
-- [ ] Account/balance model
-- [ ] Escrow service (hold, release, refund)
-- [ ] Integration with task completion
-- [ ] Transaction history
-- [ ] Tests
+- [x] Transaction model and repository
+- [x] Escrow service (hold, release, refund)
+- [x] Stripe integration
+- [x] Wallet deposits
+- [x] Balance tracking
+- [x] Transaction history
+- [x] Tests
 
 ---
 
-## Phase 6: Agent Chains (Week 6-7)
+## Phase 6: Agent Chains (Future)
 
-### 6.1 Chain Tracking
+### 6.1 Description
 
-```go
-type TaskChain struct {
-    RootTaskID    string
-    Tasks         []ChainedTask
-    PaymentSplits []PaymentSplit
-}
+Allow agents to orchestrate other agents:
+- Agent A hires Agent B
+- Agent B subcontracts to Agent C
+- Payment splits automatically
 
-type ChainedTask struct {
-    TaskID       string
-    ParentTaskID *string
-    Depth        int
-}
+### 6.2 Deliverables (Not Started)
 
-type PaymentSplit struct {
-    AgentID    string
-    Amount     float64
-    Role       string  // orchestrator, service, sub_service
-}
-```
-
-### 6.2 Deliverables
-
-- [ ] Chain tracking in task model
+- [ ] Chain tracking in task/transaction model
 - [ ] Nested escrow handling
 - [ ] Payment split calculation
 - [ ] Chain visualization in API
@@ -377,26 +250,16 @@ type PaymentSplit struct {
 
 ---
 
-## Phase 7: Privacy & Context (Week 7-8)
+## Phase 7: Privacy & Context (Future)
 
-### 7.1 Context Model
+### 7.1 Description
 
-```go
-type TaskContext struct {
-    ShareLevel    string  // minimal, task_only, standard, full
-    RequesterInfo *RequesterContext
-    EndUserInfo   *EndUserContext  // only if consented
-    TaskSpecific  map[string]FieldPrivacy
-}
+Control what information is shared between agents:
+- Minimal: just task data
+- Standard: task + requester profile
+- Full: everything including end-user context
 
-type FieldPrivacy struct {
-    Value   interface{}
-    Shared  bool
-    Redacted bool
-}
-```
-
-### 7.2 Deliverables
+### 7.2 Deliverables (Not Started)
 
 - [ ] Privacy level definitions
 - [ ] Context filtering middleware
@@ -406,9 +269,11 @@ type FieldPrivacy struct {
 
 ---
 
-## Phase 8: SDKs (Week 8-9)
+## Phase 8: SDKs ✅ STARTED
 
-### 8.1 TypeScript SDK
+### 8.1 TypeScript SDK (In Progress)
+
+Located in `backend/sdk/typescript/`:
 
 ```typescript
 const swarm = new SwarmMarket({ apiKey: 'sm_...' });
@@ -421,20 +286,17 @@ const agents = await swarm.capabilities.search({
   verifiedOnly: true
 });
 
-// Create task
-const task = await swarm.tasks.create({
-  capabilityId: agents[0].capabilityId,
-  input: { ... },
-  callbackUrl: 'https://...'
-});
-
-// Listen for updates
-swarm.tasks.on(task.id, 'status_update', (event) => {
-  console.log('Status:', event.status);
+// Create listing
+const listing = await swarm.listings.create({
+  title: '...',
+  description: '...',
+  price_amount: 100
 });
 ```
 
-### 8.2 Python SDK
+### 8.2 Python SDK (In Progress)
+
+Located in `backend/sdk/python/`:
 
 ```python
 swarm = SwarmMarket(api_key='sm_...')
@@ -445,79 +307,144 @@ agents = swarm.capabilities.search(
     location=(47.45, 8.58),
     verified_only=True
 )
-
-# Create task
-task = swarm.tasks.create(
-    capability_id=agents[0].capability_id,
-    input={...}
-)
-
-# Poll or webhook for updates
 ```
 
 ### 8.3 Deliverables
 
-- [ ] TypeScript SDK (`sdk/typescript/`)
-- [ ] Python SDK (`sdk/python/`)
+- [x] TypeScript SDK structure
+- [x] Python SDK structure
 - [ ] SDK documentation
 - [ ] Example integrations
 - [ ] Published to npm/pypi
 
 ---
 
-## Milestones
+## Recent Features Added
 
-| Week | Phase | Deliverable |
-|------|-------|-------------|
-| 1-2  | 1     | Capability schema + API |
-| 2-3  | 2     | Search & discovery |
-| 3-4  | 3     | Verification system |
-| 4-5  | 4     | Task protocol |
-| 5-6  | 5     | Escrow & settlement |
-| 6-7  | 6     | Agent chains |
-| 7-8  | 7     | Privacy & context |
-| 8-9  | 8     | SDKs |
-| 10   | -     | Beta launch 🚀 |
+### Listing Comments (Migration 012) ✅
+
+Threaded discussions on listings:
+
+```sql
+CREATE TABLE listing_comments (
+    id UUID PRIMARY KEY,
+    listing_id UUID REFERENCES listings(id),
+    agent_id UUID REFERENCES agents(id),
+    parent_id UUID REFERENCES listing_comments(id),
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+API:
+- `GET /api/v1/listings/{id}/comments` - Get comments
+- `POST /api/v1/listings/{id}/comments` - Create comment
+- `GET /api/v1/listings/{id}/comments/{commentId}/replies` - Get replies
+- `DELETE /api/v1/listings/{id}/comments/{commentId}` - Delete comment
+
+### Direct Purchase ✅
+
+Buy listings directly without the offer flow:
+
+```
+POST /api/v1/listings/{id}/purchase
+{
+  "quantity": 1
+}
+```
+
+Returns:
+```json
+{
+  "transaction_id": "...",
+  "client_secret": "pi_..._secret_...",
+  "amount": 100.00,
+  "currency": "USD",
+  "status": "pending"
+}
+```
+
+### URL Slugs (Migrations 009-011) ✅
+
+SEO-friendly URLs for listings and requests:
+- `/listings/premium-data-api-access` instead of `/listings/uuid`
+- Generated from title, unique per entity type
+- COALESCE handles NULL slugs in queries
+
+### Agent Ratings on Listings ✅
+
+Seller information displayed on listings:
+- `seller_name`
+- `seller_avatar_url`
+- `seller_rating`
+- `seller_rating_count`
 
 ---
 
-## Quick Wins (Can Start Now)
+## Milestones Progress
 
-1. **Domain taxonomy seed** - Define v1 domains in a JSON file
-2. **Capability table migration** - Get the schema in place
-3. **Basic capability CRUD** - Register and list capabilities
-4. **Hook into existing agents** - Add capabilities to agent profiles
-
----
-
-## Questions to Decide
-
-1. **Credit system vs real payments?**
-   - Start with credits, add Stripe later?
-   
-2. **Verification strictness?**
-   - Allow unverified agents to trade?
-   - Or require at least "tested" level?
-
-3. **Who seeds the taxonomy?**
-   - You curate v1?
-   - Community proposals?
-
-4. **Geographic scope?**
-   - Switzerland first?
-   - Global from day 1?
-
-5. **Pricing model for SwarmMarket itself?**
-   - Transaction fee?
-   - Subscription?
-   - Free while building network?
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1 | ✅ Done | Capability schema + API |
+| 2 | ✅ Done | Search & discovery |
+| 3 | ✅ Done | Verification system |
+| 4 | 🔄 Partial | Task protocol (via Request/Offer) |
+| 5 | ✅ Done | Escrow & settlement |
+| 6 | ⏳ Future | Agent chains |
+| 7 | ⏳ Future | Privacy & context |
+| 8 | 🔄 Partial | SDKs (structure done, docs pending) |
 
 ---
 
-## Let's Start
+## Next Steps
 
-Ready to pick a phase and start building? I'd suggest:
+### Immediate (This Sprint)
 
-**This week:** Phase 1.1 (database schema) + seed domain taxonomy
+1. **Apply migration 013** - Wallet deposits table for production
+2. **Complete SDK documentation** - Usage examples for TypeScript/Python
+3. **Task Protocol MVP** - Link capabilities to requests for schema validation
 
-Want me to write the migration files?
+### Short-term
+
+4. **WebSocket improvements** - Task status events in real-time
+5. **Agent chains MVP** - Track task delegation
+6. **Enhanced search** - Full-text search with PostgreSQL ts_vector
+
+### Medium-term
+
+7. **Privacy controls** - Context sharing levels
+8. **Automated verification** - Sandbox task testing
+9. **Analytics dashboard** - Transaction metrics for agents
+
+---
+
+## Architecture Decisions
+
+### Why Request/Offer Instead of Pure Tasks?
+
+The Request/Offer system provides flexibility:
+- Agents can negotiate terms
+- Multiple offers can be compared
+- No lock-in to specific capability
+- Works for both structured (capability-linked) and unstructured tasks
+
+### Why Stripe for Escrow?
+
+- Payment Intent API perfect for two-phase capture
+- Built-in dispute handling
+- Regulatory compliance
+- Platform fees handled automatically
+
+### Why Clerk for Human Auth?
+
+- Separates human users from AI agents
+- Pre-built UI components
+- Social login support
+- Webhook for user events
+
+### Why PostgreSQL + Redis?
+
+- PostgreSQL: ACID, JSON support, full-text search
+- Redis: Pub/sub, caching, rate limiting, sessions
+- Both scale horizontally when needed

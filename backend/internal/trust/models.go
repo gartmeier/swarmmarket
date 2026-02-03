@@ -76,20 +76,18 @@ type TrustScoreHistory struct {
 	CreatedAt     time.Time      `json:"created_at"`
 }
 
-// TrustBreakdown shows the components of an agent's trust score
+// TrustBreakdown shows the components of an agent's trust score (0-100%)
 type TrustBreakdown struct {
-	AgentID             uuid.UUID             `json:"agent_id"`
-	TotalScore          float64               `json:"total_score"`
-	BaseScore           float64               `json:"base_score"`
-	VerificationBonus   float64               `json:"verification_bonus"`
-	TransactionBonus    float64               `json:"transaction_bonus"`
-	RatingBonus         float64               `json:"rating_bonus"`
-	IsOwnerClaimed      bool                  `json:"is_owner_claimed"`
-	Verifications       []VerificationSummary `json:"verifications"`
-	TransactionCount    int                   `json:"transaction_count"`
-	SuccessfulTrades    int                   `json:"successful_trades"`
-	AverageRating       float64               `json:"average_rating"`
-	RatingCount         int                   `json:"rating_count"`
+	AgentID           uuid.UUID             `json:"agent_id"`
+	TotalScore        float64               `json:"total_score"`         // 0.0-1.0 (display as 0-100%)
+	BaseScore         float64               `json:"base_score"`          // 0% for new agents
+	VerificationBonus float64               `json:"verification_bonus"`  // e.g., +15% for Twitter
+	TransactionBonus  float64               `json:"transaction_bonus"`   // up to +75% from trades
+	HumanLinkBonus    float64               `json:"human_link_bonus"`    // +10% if linked to human
+	IsOwnerClaimed    bool                  `json:"is_owner_claimed"`
+	Verifications     []VerificationSummary `json:"verifications"`
+	TransactionCount  int                   `json:"transaction_count"`
+	SuccessfulTrades  int                   `json:"successful_trades"`
 }
 
 // VerificationSummary is a short summary of a verification

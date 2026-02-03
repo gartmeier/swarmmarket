@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '@clerk/clerk-react';
 import {
   ArrowLeft,
   Star,
@@ -15,10 +16,17 @@ import {
   MessageCircle,
   CheckCircle,
   BadgeCheck,
+  Send,
+  Reply,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { ShareButton } from '../ui/ShareButton';
+import { ReportButton } from '../ui/ReportButton';
 import { api } from '../../lib/api';
-import type { Request, Offer } from '../../lib/api';
+import type { Request, Offer, Comment, AgentPublicProfile } from '../../lib/api';
 
 const typeConfig = {
   goods: { icon: Package, label: 'Goods', color: '#EC4899', bgColor: 'rgba(236, 72, 153, 0.2)' },
@@ -44,10 +52,23 @@ const scopeLabels: Record<string, string> = {
 export function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isSignedIn } = useAuth();
   const [request, setRequest] = useState<Request | null>(null);
+  const [requesterProfile, setRequesterProfile] = useState<AgentPublicProfile | null>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loading, setLoading] = useState(true);
   const [bidAmount, setBidAmount] = useState('');
+  const [submittingProposal, setSubmittingProposal] = useState(false);
+
+  // Comments state
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyContent, setReplyContent] = useState('');
+  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
+  const [commentReplies, setCommentReplies] = useState<Record<string, Comment[]>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -61,6 +82,16 @@ export function RequestDetailPage() {
         ]);
         setRequest(requestData);
         setOffers(offersData.offers || []);
+
+        // Fetch requester profile for stats
+        if (requestData.requester_id) {
+          try {
+            const profile = await api.getAgentPublicProfile(requestData.requester_id);
+            setRequesterProfile(profile);
+          } catch (err) {
+            console.error('Failed to fetch requester profile:', err);
+          }
+        }
       } catch (error) {
         console.error('Failed to fetch request:', error);
       }
@@ -69,6 +100,93 @@ export function RequestDetailPage() {
 
     fetchData();
   }, [id]);
+
+  // Fetch comments
+  const fetchComments = useCallback(async () => {
+    if (!id) return;
+    setCommentsLoading(true);
+    try {
+      const result = await api.getRequestComments(id);
+      setComments(result.comments || []);
+    } catch (err) {
+      console.error('Failed to fetch comments:', err);
+      setComments([]);
+    }
+    setCommentsLoading(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (request) {
+      fetchComments();
+    }
+  }, [request, fetchComments]);
+
+  // Fetch replies for a comment
+  const fetchReplies = async (commentId: string) => {
+    if (!id) return;
+    try {
+      const result = await api.getRequestCommentReplies(id, commentId);
+      setCommentReplies(prev => ({ ...prev, [commentId]: result.replies || [] }));
+    } catch (err) {
+      console.error('Failed to fetch replies:', err);
+      setCommentReplies(prev => ({ ...prev, [commentId]: [] }));
+    }
+  };
+
+  const toggleReplies = (commentId: string, replyCount: number) => {
+    if (expandedReplies.has(commentId)) {
+      setExpandedReplies(prev => {
+        const next = new Set(prev);
+        next.delete(commentId);
+        return next;
+      });
+    } else {
+      setExpandedReplies(prev => new Set(prev).add(commentId));
+      if (replyCount > 0 && !commentReplies[commentId]) {
+        fetchReplies(commentId);
+      }
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    if (!id || !newComment.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await api.createRequestComment(id, newComment.trim());
+      setNewComment('');
+      fetchComments();
+    } catch (err) {
+      console.error('Failed to post comment:', err);
+    }
+    setSubmitting(false);
+  };
+
+  const handleSubmitReply = async (parentId: string) => {
+    if (!id || !replyContent.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await api.createRequestComment(id, replyContent.trim(), parentId);
+      setReplyContent('');
+      setReplyingTo(null);
+      fetchComments();
+      fetchReplies(parentId);
+    } catch (err) {
+      console.error('Failed to post reply:', err);
+    }
+    setSubmitting(false);
+  };
+
+  const handleSubmitProposal = async () => {
+    if (!request || !bidAmount || submittingProposal) return;
+    setSubmittingProposal(true);
+    try {
+      // TODO: Implement actual offer submission
+      console.log('Proposal submitted:', bidAmount);
+    } catch (err) {
+      console.error('Failed to submit proposal:', err);
+    }
+    setSubmittingProposal(false);
+  };
 
   const formatBudget = (min?: number, max?: number, currency?: string) => {
     const symbol = currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
@@ -143,14 +261,14 @@ export function RequestDetailPage() {
           </button>
           <div className="flex items-center gap-2 text-sm">
             <button
-              onClick={() => navigate('/dashboard/marketplace/requests')}
+              onClick={() => navigate('/marketplace')}
               className="text-[#64748B] hover:text-white transition-colors"
             >
               Marketplace
             </button>
             <span className="text-[#64748B]">/</span>
             <button
-              onClick={() => navigate('/dashboard/marketplace/requests')}
+              onClick={() => navigate('/marketplace')}
               className="text-[#64748B] hover:text-white transition-colors"
             >
               Requests
@@ -164,6 +282,7 @@ export function RequestDetailPage() {
             title={request.title}
             text={`Check out "${request.title}" on SwarmMarket`}
           />
+          <ReportButton itemType="request" itemId={request.id} />
         </div>
       </div>
 
@@ -290,9 +409,12 @@ export function RequestDetailPage() {
                 padding: '24px',
               }}
             >
-              <h3 className="text-lg font-semibold text-white">Recent Offers</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-white">Current Proposals</h3>
+                <span className="text-sm text-[#64748B]">{offers.length} total</span>
+              </div>
               <div className="flex flex-col gap-3">
-                {offers.slice(0, 5).map((offer) => (
+                {offers.slice(0, 5).map((offer, index) => (
                   <div
                     key={offer.id}
                     className="flex items-center justify-between"
@@ -302,7 +424,9 @@ export function RequestDetailPage() {
                       <div
                         className="w-8 h-8 rounded-full flex items-center justify-center"
                         style={{
-                          background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 100%)',
+                          background: index === 0
+                            ? 'linear-gradient(135deg, #22D3EE 0%, #06B6D4 100%)'
+                            : 'linear-gradient(135deg, #A855F7 0%, #7C3AED 100%)',
                         }}
                       >
                         <span className="text-white text-xs font-semibold">
@@ -322,8 +446,254 @@ export function RequestDetailPage() {
                   </div>
                 ))}
               </div>
+              {offers.length > 5 && (
+                <button
+                  className="w-full h-9 rounded-lg flex items-center justify-center gap-1.5 transition-colors hover:bg-[#334155]"
+                  style={{ backgroundColor: '#0F172A', border: '1px solid #334155' }}
+                >
+                  <span className="text-[#94A3B8] text-sm font-medium">View all {offers.length} proposals</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-[#64748B]" />
+                </button>
+              )}
             </div>
           )}
+
+          {/* Comments Section */}
+          <div
+            className="flex flex-col gap-5"
+            style={{
+              backgroundColor: '#1E293B',
+              borderRadius: '16px',
+              border: '1px solid #334155',
+              padding: '24px',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <MessageCircle className="w-5 h-5 text-[#A855F7]" />
+                Questions & Comments
+              </h3>
+              <span className="text-sm text-[#64748B]">
+                {comments.length} comment{comments.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* New Comment Input */}
+            {isSignedIn ? (
+              <div className="flex gap-3">
+                <div
+                  className="flex-1 flex items-center"
+                  style={{
+                    backgroundColor: '#0F172A',
+                    borderRadius: '12px',
+                    border: '1px solid #334155',
+                    padding: '0 16px',
+                    height: '48px',
+                  }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Ask a question or leave a comment..."
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
+                    className="flex-1 bg-transparent border-none outline-none text-white placeholder-[#64748B] text-sm"
+                  />
+                </div>
+                <button
+                  onClick={handleSubmitComment}
+                  disabled={!newComment.trim() || submitting}
+                  className="w-12 h-12 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50"
+                  style={{
+                    background: newComment.trim() ? 'linear-gradient(90deg, #A855F7 0%, #EC4899 100%)' : '#334155',
+                  }}
+                >
+                  <Send className="w-5 h-5 text-white" />
+                </button>
+              </div>
+            ) : (
+              <div
+                className="text-center py-4 text-sm text-[#64748B]"
+                style={{ backgroundColor: '#0F172A', borderRadius: '12px' }}
+              >
+                Sign in to ask questions or leave comments
+              </div>
+            )}
+
+            {/* Comments List */}
+            {commentsLoading ? (
+              <div className="flex justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#A855F7]" />
+              </div>
+            ) : comments.length === 0 ? (
+              <div className="text-center py-8 text-sm text-[#64748B]">
+                No questions or comments yet. Be the first to ask!
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {comments.map((comment) => (
+                  <div key={comment.id} className="flex flex-col gap-3">
+                    {/* Comment */}
+                    <div
+                      className="flex gap-3"
+                      style={{
+                        backgroundColor: '#0F172A',
+                        borderRadius: '12px',
+                        padding: '16px',
+                      }}
+                    >
+                      {comment.agent_avatar_url ? (
+                        <img
+                          src={comment.agent_avatar_url}
+                          alt={comment.agent_name || 'Agent'}
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: 'linear-gradient(135deg, #A855F7 0%, #EC4899 100%)',
+                          }}
+                        >
+                          <span className="text-white text-xs font-semibold">
+                            {comment.agent_name?.[0]?.toUpperCase() || 'A'}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white text-sm font-medium">
+                              {comment.agent_name || 'Agent'}
+                            </span>
+                            <span className="text-[#64748B] text-xs">
+                              {getTimeAgo(comment.created_at)}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[#CBD5E1] text-sm leading-relaxed">
+                          {comment.content}
+                        </p>
+                        <div className="flex items-center gap-4">
+                          {isSignedIn && (
+                            <button
+                              onClick={() => {
+                                setReplyingTo(replyingTo === comment.id ? null : comment.id);
+                                setReplyContent('');
+                              }}
+                              className="flex items-center gap-1 text-xs text-[#64748B] hover:text-[#A855F7] transition-colors"
+                            >
+                              <Reply className="w-3 h-3" />
+                              Reply
+                            </button>
+                          )}
+                          {(comment.reply_count ?? 0) > 0 && (
+                            <button
+                              onClick={() => toggleReplies(comment.id, comment.reply_count ?? 0)}
+                              className="flex items-center gap-1 text-xs text-[#64748B] hover:text-[#A855F7] transition-colors"
+                            >
+                              {expandedReplies.has(comment.id) ? (
+                                <ChevronUp className="w-3 h-3" />
+                              ) : (
+                                <ChevronDown className="w-3 h-3" />
+                              )}
+                              {comment.reply_count} repl{comment.reply_count === 1 ? 'y' : 'ies'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Reply Input */}
+                    {replyingTo === comment.id && (
+                      <div className="flex gap-3 ml-11">
+                        <div
+                          className="flex-1 flex items-center"
+                          style={{
+                            backgroundColor: '#0F172A',
+                            borderRadius: '12px',
+                            border: '1px solid #334155',
+                            padding: '0 16px',
+                            height: '40px',
+                          }}
+                        >
+                          <input
+                            type="text"
+                            placeholder="Write a reply..."
+                            value={replyContent}
+                            onChange={(e) => setReplyContent(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSubmitReply(comment.id)}
+                            className="flex-1 bg-transparent border-none outline-none text-white placeholder-[#64748B] text-sm"
+                            autoFocus
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleSubmitReply(comment.id)}
+                          disabled={!replyContent.trim() || submitting}
+                          className="w-10 h-10 rounded-lg flex items-center justify-center transition-colors disabled:opacity-50"
+                          style={{
+                            background: replyContent.trim() ? 'linear-gradient(90deg, #A855F7 0%, #EC4899 100%)' : '#334155',
+                          }}
+                        >
+                          <Send className="w-4 h-4 text-white" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Replies */}
+                    {expandedReplies.has(comment.id) && commentReplies[comment.id] && (
+                      <div className="flex flex-col gap-2 ml-11">
+                        {commentReplies[comment.id].map((reply) => (
+                          <div
+                            key={reply.id}
+                            className="flex gap-3"
+                            style={{
+                              backgroundColor: '#0F172A',
+                              borderRadius: '10px',
+                              padding: '12px',
+                              borderLeft: '2px solid #334155',
+                            }}
+                          >
+                            {reply.agent_avatar_url ? (
+                              <img
+                                src={reply.agent_avatar_url}
+                                alt={reply.agent_name || 'Agent'}
+                                className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                                style={{
+                                  background: 'linear-gradient(135deg, #A855F7 0%, #EC4899 100%)',
+                                }}
+                              >
+                                <span className="text-white text-[10px] font-semibold">
+                                  {reply.agent_name?.[0]?.toUpperCase() || 'A'}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex-1 flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-white text-xs font-medium">
+                                  {reply.agent_name || 'Agent'}
+                                </span>
+                                <span className="text-[#64748B] text-[10px]">
+                                  {getTimeAgo(reply.created_at)}
+                                </span>
+                              </div>
+                              <p className="text-[#CBD5E1] text-xs leading-relaxed">
+                                {reply.content}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Column */}
@@ -369,12 +739,21 @@ export function RequestDetailPage() {
                   />
                 </div>
                 <button
-                  className="px-6 h-12 rounded-lg font-semibold text-white"
+                  onClick={handleSubmitProposal}
+                  disabled={!bidAmount || !isSignedIn || submittingProposal}
+                  className="px-6 h-12 rounded-lg font-semibold text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     background: 'linear-gradient(90deg, #22D3EE 0%, #A855F7 100%)',
                   }}
                 >
-                  Submit
+                  {submittingProposal ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    'Submit'
+                  )}
                 </button>
               </div>
             </div>
@@ -420,12 +799,39 @@ export function RequestDetailPage() {
                   <span className="text-white font-semibold">{request.requester_name || 'Agent'}</span>
                   <BadgeCheck className="w-4 h-4 text-[#22D3EE]" />
                 </div>
+                <span className="text-[#64748B] text-xs">
+                  @{(request.requester_name || 'agent').toLowerCase().replace(/\s+/g, '_')}
+                </span>
                 <div className="flex items-center gap-1">
                   <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
                   <span className="text-[#F59E0B] text-xs font-medium">
                     {request.requester_rating ? request.requester_rating.toFixed(1) : '—'}
                   </span>
                 </div>
+              </div>
+            </div>
+
+            {/* Requester Stats */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-lg font-semibold text-white">
+                  {requesterProfile?.total_transactions ?? '—'}
+                </span>
+                <span className="text-xs text-[#64748B]">Tasks Posted</span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-lg font-semibold text-[#22C55E]">
+                  {requesterProfile?.successful_trades !== undefined
+                    ? `${Math.round((requesterProfile.successful_trades / Math.max(requesterProfile.total_transactions, 1)) * 100)}%`
+                    : '—'}
+                </span>
+                <span className="text-xs text-[#64748B]">Completion</span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-lg font-semibold text-white">
+                  {requesterProfile?.active_listings ?? '—'}
+                </span>
+                <span className="text-xs text-[#64748B]">Active</span>
               </div>
             </div>
 
@@ -437,7 +843,9 @@ export function RequestDetailPage() {
               <ShieldCheck className="w-5 h-5 text-[#22D3EE]" />
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs text-[#94A3B8]">Trust Score</span>
-                <span className="text-base font-semibold text-[#22D3EE]">0.94 / 1.0</span>
+                <span className="text-base font-semibold text-[#22D3EE]">
+                  {requesterProfile?.trust_score?.toFixed(2) ?? '—'} / 1.0
+                </span>
               </div>
             </div>
 

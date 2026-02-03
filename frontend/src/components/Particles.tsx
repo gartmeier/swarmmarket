@@ -8,6 +8,7 @@ interface Particle {
   baseVx: number;
   baseVy: number;
   radius: number;
+  baseRadius: number; // Original radius for scaling
   color: string;
   alpha: number;
   trail: { x: number; y: number; alpha: number }[];
@@ -42,6 +43,8 @@ export function Particles() {
   const scrollVelocityRef = useRef<number>(0);
   const lastScrollYRef = useRef<number>(0);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const centerXRef = useRef<number>(0);
+  const centerYRef = useRef<number>(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -53,11 +56,13 @@ export function Particles() {
     const resizeCanvas = () => {
       canvas.width = canvas.offsetWidth;
       canvas.height = canvas.offsetHeight;
+      centerXRef.current = canvas.width / 2;
+      centerYRef.current = canvas.height / 2;
     };
 
     const createParticle = (_: unknown, __?: number): Particle => {
       const type = Math.random();
-      const baseSpeed = type < 0.15 ? 3 : type < 0.4 ? 2 : type < 0.7 ? 0.5 : 1.25;
+      const baseSpeed = type < 0.15 ? 4 : type < 0.4 ? 3 : type < 0.7 ? 1 : 2;
       const vx = (Math.random() - 0.5) * baseSpeed;
       const vy = (Math.random() - 0.5) * baseSpeed;
 
@@ -78,6 +83,7 @@ export function Particles() {
         baseVx: vx,
         baseVy: vy,
         radius,
+        baseRadius: radius,
         color: COLORS[Math.floor(Math.random() * COLORS.length)],
         alpha,
         trail: [],
@@ -166,62 +172,54 @@ export function Particles() {
     };
 
     const updateParticle = (p: Particle) => {
-      // Get scroll intensity - scales directly with scroll speed
       const scrollSpeed = Math.abs(scrollVelocityRef.current);
-      const scrollIntensity = scrollSpeed / 5; // Faster response to scroll
 
-      // Only update trail and position when scrolling (low threshold for smooth ease-out)
       if (scrollSpeed > 0.1) {
         // Update trail
         p.trail.unshift({ x: p.x, y: p.y, alpha: p.alpha });
-        if (p.trail.length > 8) p.trail.pop();
-        p.trail.forEach((t) => (t.alpha *= 0.85));
+        if (p.trail.length > 10) p.trail.pop();
+        p.trail.forEach((t) => (t.alpha *= 0.8));
 
-        // Wave motion - scaled by scroll speed
-        const waveScale = Math.min(scrollIntensity, 4); // Cap wave effect
-        const waveX = Math.sin(timeRef.current * 0.02 + p.waveOffset) * p.waveAmplitude * waveScale;
-        const waveY = Math.cos(timeRef.current * 0.015 + p.waveOffset) * p.waveAmplitude * waveScale;
+        // Calculate direction from center to particle (starfield direction)
+        const dx = p.x - centerXRef.current;
+        const dy = p.y - centerYRef.current;
+        const distFromCenter = Math.sqrt(dx * dx + dy * dy);
 
-        // Mouse repulsion
-        const mdx = p.x - mouseRef.current.x;
-        const mdy = p.y - mouseRef.current.y;
-        const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy);
-        const mouseRadius = 150;
-        let mouseForceX = 0;
-        let mouseForceY = 0;
-        if (mouseDist < mouseRadius && mouseDist > 0) {
-          const force = (1 - mouseDist / mouseRadius) * 3;
-          mouseForceX = (mdx / mouseDist) * force;
-          mouseForceY = (mdy / mouseDist) * force;
+        // Normalize direction (avoid division by zero)
+        const dirX = distFromCenter > 0 ? dx / distFromCenter : 0;
+        const dirY = distFromCenter > 0 ? dy / distFromCenter : 0;
+
+        // Bigger stars move faster (radius affects speed)
+        const baseSpeed = 0.5 + (p.radius / 5) * 3;
+        const speed = baseSpeed * (scrollSpeed / 2);
+
+        // Scroll down = outward, scroll up = inward
+        const direction = scrollVelocityRef.current > 0 ? 1 : -1;
+
+        // Apply starfield movement
+        p.x += dirX * speed * direction;
+        p.y += dirY * speed * direction;
+
+        // When going off screen, wrap to opposite side
+        const margin = 50;
+        if (p.x < -margin) p.x = canvas.width + margin;
+        if (p.x > canvas.width + margin) p.x = -margin;
+        if (p.y < -margin) p.y = canvas.height + margin;
+        if (p.y > canvas.height + margin) p.y = -margin;
+
+        // Scale radius based on distance from center (35% at center, 100% at edges)
+        const maxDist = Math.max(canvas.width, canvas.height) * 0.5;
+        const distRatio = Math.min(distFromCenter / maxDist, 1);
+        p.radius = p.baseRadius * (0.35 + distRatio * 0.65);
+
+        // When scrolling up and star gets close to center, move to edge
+        if (direction < 0 && distFromCenter < 20) {
+          const angle = Math.random() * Math.PI * 2;
+          const edgeDist = Math.max(canvas.width, canvas.height) * 0.6;
+          p.x = centerXRef.current + Math.cos(angle) * edgeDist;
+          p.y = centerYRef.current + Math.sin(angle) * edgeDist;
+          p.trail = [];
         }
-
-        // Gravity points attraction
-        let gravityForceX = 0;
-        let gravityForceY = 0;
-        for (const gp of gravityPointsRef.current) {
-          const gdx = gp.x - p.x;
-          const gdy = gp.y - p.y;
-          const gDist = Math.sqrt(gdx * gdx + gdy * gdy);
-          if (gDist < gp.radius && gDist > 0) {
-            const force = (1 - gDist / gp.radius) * gp.strength;
-            gravityForceX += (gdx / gDist) * force;
-            gravityForceY += (gdy / gDist) * force;
-          }
-        }
-
-        // Apply forces - movement speed proportional to scroll speed
-        const speedMultiplier = Math.min(scrollIntensity, 10); // Cap at 10x for very fast scrolls
-        p.vx = (p.baseVx + waveX + mouseForceX + gravityForceX) * speedMultiplier;
-        p.vy = (p.baseVy + waveY + mouseForceY + gravityForceY) * speedMultiplier;
-
-        p.x += p.vx;
-        p.y += p.vy;
-
-        // Wrap around edges
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
-        if (p.y < 0) p.y = canvas.height;
-        if (p.y > canvas.height) p.y = 0;
       } else {
         // Fade out trails when not scrolling
         p.trail.forEach((t) => (t.alpha *= 0.9));

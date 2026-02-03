@@ -6,16 +6,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/stripe/stripe-go/v76/webhook"
 	"github.com/digi604/swarmmarket/backend/internal/common"
 	"github.com/digi604/swarmmarket/backend/internal/payment"
 	"github.com/digi604/swarmmarket/backend/internal/transaction"
 	"github.com/digi604/swarmmarket/backend/internal/wallet"
 	"github.com/digi604/swarmmarket/backend/pkg/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/stripe/stripe-go/v76/webhook"
 )
+
+// webhookTimestampTolerance is the maximum age of a webhook event we'll accept.
+// This helps prevent replay attacks.
+const webhookTimestampTolerance = 5 * time.Minute
 
 // PaymentHandler handles payment HTTP requests.
 type PaymentHandler struct {
@@ -43,6 +48,11 @@ type CreatePaymentIntentRequest struct {
 
 // CreatePaymentIntent handles POST /payments/intent - create payment intent for escrow.
 func (h *PaymentHandler) CreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
+	if h.paymentService == nil {
+		common.WriteError(w, http.StatusServiceUnavailable, common.ErrServiceUnavailable("payments are not configured"))
+		return
+	}
+
 	agent := middleware.GetAgent(r.Context())
 	if agent == nil {
 		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
@@ -97,6 +107,11 @@ func (h *PaymentHandler) CreatePaymentIntent(w http.ResponseWriter, r *http.Requ
 
 // GetPaymentStatus handles GET /payments/{paymentIntentId} - get payment status.
 func (h *PaymentHandler) GetPaymentStatus(w http.ResponseWriter, r *http.Request) {
+	if h.paymentService == nil {
+		common.WriteError(w, http.StatusServiceUnavailable, common.ErrServiceUnavailable("payments are not configured"))
+		return
+	}
+
 	agent := middleware.GetAgent(r.Context())
 	if agent == nil {
 		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
@@ -120,13 +135,18 @@ func (h *PaymentHandler) GetPaymentStatus(w http.ResponseWriter, r *http.Request
 
 // HandleWebhook handles POST /payments/webhook - Stripe webhook events.
 func (h *PaymentHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.paymentService == nil {
+		common.WriteError(w, http.StatusServiceUnavailable, common.ErrServiceUnavailable("payments are not configured"))
+		return
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("failed to read body"))
 		return
 	}
 
-	// Verify webhook signature
+	// Verify webhook signature with timestamp tolerance to prevent replay attacks
 	sig := r.Header.Get("Stripe-Signature")
 	event, err := webhook.ConstructEventWithOptions(body, sig, h.webhookSecret, webhook.ConstructEventOptions{
 		IgnoreAPIVersionMismatch: true,
@@ -134,6 +154,15 @@ func (h *PaymentHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Printf("[Stripe Webhook] Signature verification error: %v\n", err)
 		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid signature"))
+		return
+	}
+
+	// Additional timestamp check for replay attack prevention
+	// Stripe's signature includes a timestamp, but we add an extra check
+	eventTime := time.Unix(event.Created, 0)
+	if time.Since(eventTime) > webhookTimestampTolerance {
+		fmt.Printf("[Stripe Webhook] Event too old: %v\n", eventTime)
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("event expired"))
 		return
 	}
 
@@ -196,9 +225,9 @@ func (h *PaymentHandler) handlePaymentSucceeded(ctx context.Context, data []byte
 
 func (h *PaymentHandler) handlePaymentFailed(ctx context.Context, data []byte) {
 	var pi struct {
-		ID                 string            `json:"id"`
-		Metadata           map[string]string `json:"metadata"`
-		LastPaymentError   *struct {
+		ID               string            `json:"id"`
+		Metadata         map[string]string `json:"metadata"`
+		LastPaymentError *struct {
 			Message string `json:"message"`
 		} `json:"last_payment_error"`
 	}
@@ -240,7 +269,7 @@ func (h *PaymentHandler) handlePaymentFailed(ctx context.Context, data []byte) {
 
 	// Publish payment failed event for notification
 	// The transaction stays in "pending" - buyer can retry
-	_ = tx // Would use for notification
+	h.transactionService.PublishPaymentFailed(ctx, tx, pi.ID, failureReason)
 }
 
 func (h *PaymentHandler) handleRefund(ctx context.Context, data []byte) {

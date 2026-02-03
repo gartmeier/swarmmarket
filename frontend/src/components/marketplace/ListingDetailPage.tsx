@@ -20,8 +20,10 @@ import {
   Reply,
   ChevronDown,
   ChevronUp,
+  Loader2,
 } from 'lucide-react';
 import { ShareButton } from '../ui/ShareButton';
+import { ReportButton } from '../ui/ReportButton';
 import { api } from '../../lib/api';
 import type { Listing, AgentPublicProfile, Comment } from '../../lib/api';
 
@@ -64,6 +66,10 @@ export function ListingDetailPage() {
   const [replyContent, setReplyContent] = useState('');
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
   const [commentReplies, setCommentReplies] = useState<Record<string, Comment[]>>({});
+
+  // Purchase state
+  const [purchasing, setPurchasing] = useState(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -165,6 +171,29 @@ export function ListingDetailPage() {
     setSubmitting(false);
   };
 
+  const handlePurchase = async () => {
+    if (!listing || purchasing) return;
+
+    setPurchasing(true);
+    setPurchaseError(null);
+
+    try {
+      const qty = parseInt(quantity || '1');
+      const result = await api.purchaseListing(listing.id, qty);
+
+      // Navigate to transaction page to complete payment
+      // The transaction page will handle the Stripe payment flow
+      navigate(`/dashboard/transactions/${result.transaction_id}`, {
+        state: { clientSecret: result.client_secret },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Purchase failed';
+      setPurchaseError(message);
+      console.error('Purchase failed:', err);
+    }
+    setPurchasing(false);
+  };
+
   const formatPrice = (amount?: number, currency?: string) => {
     if (!amount) return 'Contact for price';
     const symbol = currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
@@ -238,14 +267,14 @@ export function ListingDetailPage() {
           </button>
           <div className="flex items-center gap-2 text-sm">
             <button
-              onClick={() => navigate('/dashboard/marketplace/requests')}
+              onClick={() => navigate('/marketplace')}
               className="text-[#64748B] hover:text-white transition-colors"
             >
               Marketplace
             </button>
             <span className="text-[#64748B]">/</span>
             <button
-              onClick={() => navigate('/dashboard/marketplace/listings')}
+              onClick={() => navigate('/marketplace')}
               className="text-[#64748B] hover:text-white transition-colors"
             >
               Listings
@@ -259,6 +288,7 @@ export function ListingDetailPage() {
             title={listing.title}
             text={`Check out "${listing.title}" on SwarmMarket`}
           />
+          <ReportButton itemType="listing" itemId={listing.id} />
         </div>
       </div>
 
@@ -662,16 +692,30 @@ export function ListingDetailPage() {
                   />
                 </div>
                 <button
-                  className="px-6 h-12 rounded-lg font-semibold text-white flex items-center gap-2"
+                  onClick={handlePurchase}
+                  disabled={purchasing || !isSignedIn}
+                  className="px-6 h-12 rounded-lg font-semibold text-white flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{
                     background: 'linear-gradient(90deg, #22D3EE 0%, #A855F7 100%)',
                   }}
                 >
-                  <ShoppingCart className="w-4 h-4" />
-                  Buy Now
+                  {purchasing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ShoppingCart className="w-4 h-4" />
+                  )}
+                  {purchasing ? 'Processing...' : 'Buy Now'}
                 </button>
               </div>
             </div>
+
+            {purchaseError && (
+              <p className="text-sm text-red-400">{purchaseError}</p>
+            )}
+
+            {!isSignedIn && (
+              <p className="text-xs text-[#F59E0B]">Sign in to purchase this listing</p>
+            )}
 
             <p className="text-xs text-[#64748B]">
               Total: {formatPrice(totalPrice, listing.price_currency)} ({quantity} × {formatPrice(listing.price_amount, listing.price_currency)})
@@ -714,6 +758,9 @@ export function ListingDetailPage() {
                   <span className="text-white font-semibold">{listing.seller_name || 'Agent'}</span>
                   <BadgeCheck className="w-4 h-4 text-[#22D3EE]" />
                 </div>
+                <span className="text-[#64748B] text-xs">
+                  @{(listing.seller_name || 'agent').toLowerCase().replace(/\s+/g, '_')}
+                </span>
                 <div className="flex items-center gap-1">
                   <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
                   <span className="text-[#F59E0B] text-xs font-medium">

@@ -1,17 +1,17 @@
-import { Star, MapPin, Package, Wrench, Database, MessageSquare, Clock } from 'lucide-react';
+import { MessageCircle, Globe, MapPin, Timer } from 'lucide-react';
 import type { Request } from '../../lib/api';
 
-const typeConfig = {
-  goods: { icon: Package, label: 'Goods', color: '#EC4899', bgColor: 'rgba(236, 72, 153, 0.2)' },
-  services: { icon: Wrench, label: 'Services', color: '#22D3EE', bgColor: 'rgba(34, 211, 238, 0.2)' },
-  data: { icon: Database, label: 'Data', color: '#A855F7', bgColor: 'rgba(168, 85, 247, 0.2)' },
+const typeConfig: Record<string, { label: string; color: string; bgColor: string; gradient: string }> = {
+  goods: { label: 'Goods', color: '#EC4899', bgColor: '#EC489920', gradient: 'linear-gradient(135deg, #EC4899 0%, #F59E0B 100%)' },
+  services: { label: 'Services', color: '#A855F7', bgColor: '#A855F720', gradient: 'linear-gradient(135deg, #A855F7 0%, #22D3EE 100%)' },
+  data: { label: 'Data', color: '#22D3EE', bgColor: '#22D3EE20', gradient: 'linear-gradient(135deg, #22D3EE 0%, #22C55E 100%)' },
 };
 
-const scopeLabels: Record<string, string> = {
-  local: 'Local',
-  regional: 'Regional',
-  national: 'National',
-  international: 'International',
+const scopeConfig: Record<string, { icon: typeof Globe; label: string }> = {
+  local: { icon: MapPin, label: 'Local' },
+  regional: { icon: MapPin, label: 'Regional' },
+  national: { icon: MapPin, label: 'National' },
+  international: { icon: Globe, label: 'International' },
 };
 
 interface RequestCardProps {
@@ -20,8 +20,9 @@ interface RequestCardProps {
 }
 
 export function RequestCard({ request, onClick }: RequestCardProps) {
-  const type = typeConfig[request.request_type] || typeConfig.goods;
-  const TypeIcon = type.icon;
+  const type = typeConfig[request.request_type] || typeConfig.services;
+  const scope = scopeConfig[request.geographic_scope] || scopeConfig.international;
+  const ScopeIcon = scope.icon;
 
   const formatBudget = (min?: number, max?: number, currency?: string) => {
     const symbol = currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
@@ -30,27 +31,30 @@ export function RequestCard({ request, onClick }: RequestCardProps) {
     }
     if (max) return `Up to ${symbol}${max.toLocaleString()}`;
     if (min) return `From ${symbol}${min.toLocaleString()}`;
-    return 'Open budget';
+    return 'Open';
   };
 
-  const getTimeRemaining = (expiresAt?: string) => {
-    if (!expiresAt) return null;
+  // Calculate time remaining
+  const getTimeRemaining = () => {
+    if (!request.expires_at) return null;
     const now = new Date();
-    const expires = new Date(expiresAt);
-    const diff = expires.getTime() - now.getTime();
-    if (diff <= 0) return 'Expired';
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const days = Math.floor(hours / 24);
-    if (days > 0) return `${days}d left`;
-    return `${hours}h left`;
+    const expires = new Date(request.expires_at);
+    const diffMs = expires.getTime() - now.getTime();
+    if (diffMs <= 0) return 'Expired';
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays > 0) return `Ends in ${diffDays}d`;
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    if (diffHours > 0) return `Ends in ${diffHours}h`;
+    return 'Ending soon';
   };
 
-  const timeRemaining = getTimeRemaining(request.expires_at);
+  const timeRemaining = getTimeRemaining();
+  const hasOffers = request.offer_count > 0;
 
   return (
     <div
       onClick={onClick}
-      className="cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg"
+      className="cursor-pointer transition-all hover:scale-[1.01] hover:border-[#475569]"
       style={{
         backgroundColor: '#1E293B',
         borderRadius: '16px',
@@ -61,106 +65,110 @@ export function RequestCard({ request, onClick }: RequestCardProps) {
         gap: '16px',
       }}
     >
-      {/* Header with Type Badge & Offers Count */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2">
-          <div
-            className="flex items-center gap-1.5"
-            style={{
-              backgroundColor: type.bgColor,
-              borderRadius: '6px',
-              padding: '6px 10px',
-            }}
+      {/* Card Top - Type Badge + Offers Badge */}
+      <div className="flex items-center justify-between" style={{ width: '100%' }}>
+        {/* Type Badge */}
+        <span
+          className="text-xs font-medium"
+          style={{
+            color: type.color,
+            backgroundColor: type.bgColor,
+            borderRadius: '6px',
+            padding: '4px 10px',
+          }}
+        >
+          {type.label}
+        </span>
+        {/* Offers Badge */}
+        <div
+          className="flex items-center gap-1"
+          style={{
+            backgroundColor: hasOffers ? '#22C55E20' : '#64748B20',
+            borderRadius: '6px',
+            padding: '4px 10px',
+          }}
+        >
+          <MessageCircle
+            className="w-3 h-3"
+            style={{ color: hasOffers ? '#22C55E' : '#64748B' }}
+          />
+          <span
+            className="text-xs font-medium"
+            style={{ color: hasOffers ? '#22C55E' : '#64748B' }}
           >
-            <TypeIcon className="w-3.5 h-3.5" style={{ color: type.color }} />
-            <span className="text-xs font-medium" style={{ color: type.color }}>
-              {type.label}
-            </span>
-          </div>
-          {request.offer_count > 0 && (
-            <div
-              className="flex items-center gap-1"
-              style={{
-                backgroundColor: 'rgba(168, 85, 247, 0.2)',
-                borderRadius: '6px',
-                padding: '6px 10px',
-              }}
-            >
-              <MessageSquare className="w-3 h-3" style={{ color: '#A855F7' }} />
-              <span className="text-xs font-medium" style={{ color: '#A855F7' }}>
-                {request.offer_count} {request.offer_count === 1 ? 'Offer' : 'Offers'}
-              </span>
-            </div>
-          )}
+            {request.offer_count} Offer{request.offer_count !== 1 ? 's' : ''}
+          </span>
         </div>
-        {timeRemaining && (
-          <div className="flex items-center gap-1 text-[#64748B]">
-            <Clock className="w-3.5 h-3.5" />
-            <span className="text-xs">{timeRemaining}</span>
-          </div>
-        )}
       </div>
 
-      {/* Title & Description */}
+      {/* Card Content - Title + Description */}
       <div className="flex flex-col gap-2">
-        <h3 className="text-white font-semibold text-base leading-tight line-clamp-2">
+        <h3 className="text-white text-base font-semibold line-clamp-2">
           {request.title}
         </h3>
-        <p className="text-[#94A3B8] text-sm line-clamp-2">{request.description}</p>
+        <p className="text-[#94A3B8] text-sm line-clamp-2">
+          {request.description}
+        </p>
       </div>
 
       {/* Budget Section */}
       <div
-        className="flex items-center justify-between"
+        className="flex flex-col gap-1"
         style={{
           backgroundColor: '#0F172A',
           borderRadius: '8px',
           padding: '12px',
         }}
       >
-        <span className="text-[#64748B] text-xs">Budget</span>
-        <span className="text-base font-bold" style={{ color: '#A855F7' }}>
-          {formatBudget(request.budget_min, request.budget_max, request.budget_currency)}
-        </span>
+        {/* Budget Row */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-[#64748B]">Budget</span>
+          <span className="text-base font-semibold" style={{ color: '#22C55E' }}>
+            {formatBudget(request.budget_min, request.budget_max, request.budget_currency)}
+          </span>
+        </div>
+        {/* Scope Row */}
+        <div className="flex items-center gap-1.5">
+          <ScopeIcon className="w-3 h-3 text-[#64748B]" />
+          <span className="text-xs text-[#64748B]">{scope.label}</span>
+        </div>
       </div>
 
-      {/* Requester Info & Location */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      {/* Requester Section */}
+      <div className="flex items-center justify-between" style={{ width: '100%' }}>
+        {/* Left - Avatar + Info */}
+        <div className="flex items-center gap-3">
           {request.requester_avatar_url ? (
             <img
               src={request.requester_avatar_url}
               alt={request.requester_name || 'Agent'}
-              className="w-9 h-9 rounded-full object-cover"
+              className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+              style={{ border: '2px solid #334155' }}
             />
           ) : (
             <div
-              className="w-9 h-9 rounded-full flex items-center justify-center"
-              style={{
-                background: 'linear-gradient(135deg, #22D3EE 0%, #A855F7 50%, #EC4899 100%)',
-              }}
-            >
-              <span className="text-white text-xs font-semibold">
-                {request.requester_name?.[0]?.toUpperCase() || 'A'}
-              </span>
-            </div>
+              className="w-9 h-9 rounded-full flex-shrink-0"
+              style={{ background: type.gradient }}
+            />
           )}
-          <div className="flex flex-col">
+          <div className="flex flex-col gap-0.5">
             <span className="text-white text-sm font-medium">
               {request.requester_name || 'Agent'}
             </span>
-            <div className="flex items-center gap-1">
-              <Star className="w-3 h-3" style={{ color: '#F59E0B', fill: '#F59E0B' }} />
-              <span className="text-[#F59E0B] text-xs font-medium">
-                {request.requester_rating ? request.requester_rating.toFixed(1) : '—'}
-              </span>
-            </div>
+            <span className="text-[#64748B] text-xs">
+              {request.requester_rating ? `★ ${request.requester_rating.toFixed(1)}` : '@basic'}
+            </span>
           </div>
         </div>
-        <div className="flex items-center gap-1 text-[#64748B]">
-          <MapPin className="w-3.5 h-3.5" />
-          <span className="text-xs">{scopeLabels[request.geographic_scope] || 'Global'}</span>
-        </div>
+        {/* Right - Expiry */}
+        {timeRemaining && (
+          <div className="flex items-center gap-1.5">
+            <Timer className="w-3.5 h-3.5" style={{ color: '#F59E0B' }} />
+            <span className="text-[13px] font-medium" style={{ color: '#F59E0B' }}>
+              {timeRemaining}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

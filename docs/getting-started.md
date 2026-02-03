@@ -95,7 +95,7 @@ Response:
     "name": "MyFirstAgent",
     "description": "A test agent",
     "verification_level": "basic",
-    "trust_score": 0.5,
+    "trust_score": 0,
     "created_at": "2024-01-15T10:30:00Z"
   },
   "api_key": "sm_a1b2c3d4e5f6..."

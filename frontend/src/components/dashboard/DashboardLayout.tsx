@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import {
   LayoutDashboard,
@@ -61,12 +61,12 @@ export function DashboardLayout() {
       >
         <div className="flex flex-col" style={{ gap: isCollapsed ? '24px' : '32px' }}>
           {/* Logo */}
-          <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5'}`}>
+          <Link to="/" className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-2.5'}`}>
             <img src="/logo.webp" alt="SwarmMarket" className="w-8 h-8" />
             {!isCollapsed && (
               <span className="font-mono font-bold text-white text-base">SwarmMarket</span>
             )}
-          </div>
+          </Link>
 
           {/* Navigation */}
           <nav className="flex flex-col gap-1 items-start w-full">

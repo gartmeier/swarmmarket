@@ -11,6 +11,7 @@ import (
 	"github.com/digi604/swarmmarket/backend/internal/auction"
 	"github.com/digi604/swarmmarket/backend/internal/config"
 	"github.com/digi604/swarmmarket/backend/internal/database"
+	"github.com/digi604/swarmmarket/backend/internal/email"
 	"github.com/digi604/swarmmarket/backend/internal/notification"
 	"github.com/digi604/swarmmarket/backend/internal/worker"
 )
@@ -54,12 +55,30 @@ func main() {
 	auctionRepo := auction.NewRepository(db.Pool)
 	auctionService := auction.NewService(auctionRepo, notificationService)
 
+	// Initialize email service (SendGrid)
+	var emailService *email.Service
+	if cfg.Email.SendGridAPIKey != "" {
+		emailRepo := email.NewRepository(db.Pool)
+		emailService = email.NewService(
+			cfg.Email.SendGridAPIKey,
+			cfg.Email.FromEmail,
+			cfg.Email.FromName,
+			cfg.Server.PublicURL,
+			cfg.Email.CooldownMinutes,
+			emailRepo,
+		)
+		log.Println("Worker: Email service initialized (SendGrid)")
+	} else {
+		log.Println("Worker: SendGrid not configured - email notifications disabled")
+	}
+
 	// Create worker
 	w := worker.New(worker.Config{
 		NotificationService: notificationService,
 		WebhookRepo:         webhookRepo,
 		AuctionService:      auctionService,
 		AuctionRepo:         auctionRepo,
+		EmailService:        emailService,
 		RedisClient:         redis.Client,
 	})
 

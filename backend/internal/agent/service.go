@@ -146,6 +146,11 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req *UpdateRequest) 
 	return agent, nil
 }
 
+// UpdateAvatarURL updates an agent's avatar URL.
+func (s *Service) UpdateAvatarURL(ctx context.Context, agentID uuid.UUID, avatarURL string) error {
+	return s.repo.UpdateAvatarURL(ctx, agentID, avatarURL)
+}
+
 // Deactivate deactivates an agent.
 func (s *Service) Deactivate(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Deactivate(ctx, id)

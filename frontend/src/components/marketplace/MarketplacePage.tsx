@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Search, ChevronDown, X, Store, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Search, ChevronDown, X, AlertTriangle, RefreshCw, Tag, HandHelping, Gavel, SlidersHorizontal, Layers, DollarSign, Globe, ArrowUpDown, Store } from 'lucide-react';
 import { api } from '../../lib/api';
 import type { Listing, Request, Auction, Category } from '../../lib/api';
 import { ListingCard } from './ListingCard';
@@ -11,10 +11,10 @@ type TabType = 'listings' | 'requests' | 'auctions';
 type ListingType = 'goods' | 'services' | 'data' | '';
 type GeographicScope = 'local' | 'regional' | 'national' | 'international' | '';
 
-const tabs: { id: TabType; label: string; color: string }[] = [
-  { id: 'requests', label: 'Requests', color: '#A855F7' },
-  { id: 'auctions', label: 'Auctions', color: '#EC4899' },
-  { id: 'listings', label: 'Listings', color: '#22D3EE' },
+const tabs: { id: TabType; label: string; color: string; icon: typeof Tag }[] = [
+  { id: 'requests', label: 'Requests', color: '#A855F7', icon: HandHelping },
+  { id: 'auctions', label: 'Auctions', color: '#EC4899', icon: Gavel },
+  { id: 'listings', label: 'Listings', color: '#22D3EE', icon: Tag },
 ];
 
 const typeOptions = [
@@ -54,14 +54,18 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Derive active tab from URL path
+  // Derive active tab from URL path or state
   const getTabFromPath = (): TabType => {
     if (location.pathname.includes('/marketplace/auctions')) return 'auctions';
     if (location.pathname.includes('/marketplace/listings')) return 'listings';
     return 'requests'; // default
   };
 
-  const activeTab = getTabFromPath();
+  // For public marketplace (/marketplace), use state-based tabs
+  // For dashboard, use URL-based tabs
+  const isDashboard = location.pathname.startsWith('/dashboard');
+  const [stateTab, setStateTab] = useState<TabType>('requests');
+  const activeTab = isDashboard ? getTabFromPath() : stateTab;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<ListingType>('');
   const [selectedScope, setSelectedScope] = useState<GeographicScope>('');
@@ -143,7 +147,13 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
   };
 
   const handleTabChange = (tab: TabType) => {
-    navigate(`/dashboard/marketplace/${tab}`);
+    if (isDashboard) {
+      // Dashboard uses URL-based navigation
+      navigate(`/dashboard/marketplace/${tab}`);
+    } else {
+      // Public marketplace uses state-based tabs
+      setStateTab(tab);
+    }
     setSortBy(getDefaultSort(tab));
   };
 
@@ -153,83 +163,100 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
     <div className="flex flex-col gap-6 w-full">
       {/* Header */}
       {showHeader && (
-        <div className="flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: '#1E293B' }}
-          >
-            <Store className="w-5 h-5" style={{ color: activeTabColor }} />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">Explore Marketplace</h1>
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-[28px] font-semibold text-white">Explore Marketplace</h1>
             <p className="text-sm text-[#64748B]">
-              Discover what AI agents are offering and requesting
+              Discover what AI agents are offering
             </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Search Box */}
+            <div
+              className="flex items-center gap-3"
+              style={{
+                backgroundColor: '#1E293B',
+                borderRadius: '8px',
+                border: '1px solid #334155',
+                padding: '0 16px',
+                height: '44px',
+                width: '320px',
+              }}
+            >
+              <Search className="w-4 h-4 text-[#64748B] flex-shrink-0" />
+              <input
+                type="text"
+                placeholder="Search listings, requests, auctions..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="flex-1 bg-transparent border-none outline-none text-white text-sm placeholder:text-[#64748B]"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="text-[#64748B] hover:text-white">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            {/* Filter button */}
+            <button
+              className="flex items-center justify-center hover:border-[#475569] transition-colors"
+              style={{
+                backgroundColor: '#1E293B',
+                borderRadius: '8px',
+                border: '1px solid #334155',
+                width: '44px',
+                height: '44px',
+              }}
+            >
+              <SlidersHorizontal className="w-[18px] h-[18px] text-[#94A3B8]" />
+            </button>
           </div>
         </div>
       )}
 
-      {/* Search Bar */}
-      <div
-        className="flex items-center gap-3"
-        style={{
-          backgroundColor: '#1E293B',
-          borderRadius: '12px',
-          border: '1px solid #334155',
-          padding: '12px 16px',
-        }}
-      >
-        <Search className="w-5 h-5 text-[#64748B] flex-shrink-0" />
-        <input
-          type="text"
-          placeholder="Search listings, requests, or auctions..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="flex-1 bg-transparent border-none outline-none text-white text-sm placeholder:text-[#64748B]"
-        />
-        {searchQuery && (
-          <button onClick={() => setSearchQuery('')} className="text-[#64748B] hover:text-white">
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-
       {/* Tabs */}
-      <div className="flex items-center gap-1" style={{ borderBottom: '1px solid #334155' }}>
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => handleTabChange(tab.id)}
-            className="relative px-6 py-3 text-sm font-medium transition-colors"
-            style={{
-              color: activeTab === tab.id ? tab.color : '#64748B',
-            }}
-          >
-            {tab.label}
-            {activeTab === tab.id && (
-              <div
-                className="absolute bottom-0 left-0 right-0 h-0.5"
-                style={{ backgroundColor: tab.color }}
-              />
-            )}
-          </button>
-        ))}
+      <div className="flex items-center" style={{ borderBottom: '1px solid #334155' }}>
+        {tabs.map((tab) => {
+          const TabIcon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => handleTabChange(tab.id)}
+              className="relative flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors"
+              style={{
+                color: isActive ? tab.color : '#64748B',
+              }}
+            >
+              <TabIcon className="w-4 h-4" />
+              {tab.label}
+              {isActive && (
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-0.5"
+                  style={{ backgroundColor: tab.color }}
+                />
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         {/* Category Filter */}
         <div className="relative">
+          <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8] pointer-events-none" />
           <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
-            className="appearance-none cursor-pointer text-sm font-medium transition-colors"
+            className="appearance-none cursor-pointer text-[13px] font-medium transition-colors"
             style={{
               backgroundColor: '#1E293B',
               border: '1px solid #334155',
               borderRadius: '8px',
-              padding: '10px 36px 10px 14px',
-              color: selectedCategory ? '#FFFFFF' : '#94A3B8',
+              padding: '0 36px 0 32px',
+              height: '40px',
+              color: selectedCategory ? '#FFFFFF' : '#FFFFFF',
             }}
           >
             <option value="">All Categories</option>
@@ -248,13 +275,14 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as ListingType)}
-              className="appearance-none cursor-pointer text-sm font-medium transition-colors"
+              className="appearance-none cursor-pointer text-[13px] font-medium transition-colors"
               style={{
                 backgroundColor: '#1E293B',
                 border: '1px solid #334155',
                 borderRadius: '8px',
-                padding: '10px 36px 10px 14px',
-                color: selectedType ? '#FFFFFF' : '#94A3B8',
+                padding: '0 36px 0 14px',
+                height: '40px',
+                color: selectedType ? '#FFFFFF' : '#FFFFFF',
               }}
             >
               {typeOptions.map((opt) => (
@@ -267,19 +295,45 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
           </div>
         )}
 
-        {/* Scope Filter */}
+        {/* Price Filter (placeholder) */}
         {activeTab !== 'auctions' && (
           <div className="relative">
+            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8] pointer-events-none" />
             <select
-              value={selectedScope}
-              onChange={(e) => setSelectedScope(e.target.value as GeographicScope)}
-              className="appearance-none cursor-pointer text-sm font-medium transition-colors"
+              className="appearance-none cursor-pointer text-[13px] font-medium transition-colors"
               style={{
                 backgroundColor: '#1E293B',
                 border: '1px solid #334155',
                 borderRadius: '8px',
-                padding: '10px 36px 10px 14px',
-                color: selectedScope ? '#FFFFFF' : '#94A3B8',
+                padding: '0 36px 0 32px',
+                height: '40px',
+                color: '#FFFFFF',
+              }}
+            >
+              <option value="">Any Price</option>
+              <option value="0-50">$0 - $50</option>
+              <option value="50-100">$50 - $100</option>
+              <option value="100+">$100+</option>
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B] pointer-events-none" />
+          </div>
+        )}
+
+        {/* Scope Filter */}
+        {activeTab !== 'auctions' && (
+          <div className="relative">
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8] pointer-events-none" />
+            <select
+              value={selectedScope}
+              onChange={(e) => setSelectedScope(e.target.value as GeographicScope)}
+              className="appearance-none cursor-pointer text-[13px] font-medium transition-colors"
+              style={{
+                backgroundColor: '#1E293B',
+                border: '1px solid #334155',
+                borderRadius: '8px',
+                padding: '0 36px 0 32px',
+                height: '40px',
+                color: selectedScope ? '#FFFFFF' : '#FFFFFF',
               }}
             >
               {scopeOptions.map((opt) => (
@@ -293,17 +347,15 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
         )}
 
         {/* Sort */}
-        <div className="relative ml-auto">
+        <div className="relative flex items-center gap-2">
+          <ArrowUpDown className="w-4 h-4 text-[#64748B]" />
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="appearance-none cursor-pointer text-sm font-medium transition-colors"
+            className="appearance-none cursor-pointer text-[13px] font-medium transition-colors bg-transparent border-none outline-none"
             style={{
-              backgroundColor: '#1E293B',
-              border: '1px solid #334155',
-              borderRadius: '8px',
-              padding: '10px 36px 10px 14px',
               color: '#94A3B8',
+              paddingRight: '8px',
             }}
           >
             {(activeTab === 'requests' ? sortOptionsRequests : sortOptionsListings).map((opt) => (
@@ -312,8 +364,12 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               </option>
             ))}
           </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B] pointer-events-none" />
         </div>
+
+        {/* Results Count */}
+        <span className="text-[#64748B] text-[13px] ml-auto">
+          {loading ? 'Loading...' : error ? '' : `${total} results`}
+        </span>
 
         {/* Clear Filters */}
         {hasFilters && (
@@ -325,13 +381,6 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
             Clear filters
           </button>
         )}
-      </div>
-
-      {/* Results Count */}
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-[#64748B]">
-          {loading ? 'Loading...' : error ? 'Error loading data' : `${total} ${activeTab} found`}
-        </span>
       </div>
 
       {/* Error State */}
@@ -385,7 +434,7 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               <ListingCard
                 key={listing.id}
                 listing={listing}
-                onClick={() => navigate(`/dashboard/marketplace/listings/${listing.slug || listing.id}`)}
+                onClick={() => navigate(`/marketplace/listings/${listing.slug || listing.id}`)}
               />
             ))}
           {activeTab === 'requests' &&
@@ -393,7 +442,7 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               <RequestCard
                 key={request.id}
                 request={request}
-                onClick={() => navigate(`/dashboard/marketplace/requests/${request.slug || request.id}`)}
+                onClick={() => navigate(`/marketplace/requests/${request.slug || request.id}`)}
               />
             ))}
           {activeTab === 'auctions' &&
@@ -401,7 +450,7 @@ export function MarketplacePage({ showHeader = true }: MarketplacePageProps) {
               <AuctionCard
                 key={auction.id}
                 auction={auction}
-                onClick={() => navigate(`/dashboard/marketplace/auctions/${auction.slug || auction.id}`)}
+                onClick={() => navigate(`/marketplace/auctions/${auction.slug || auction.id}`)}
               />
             ))}
         </div>

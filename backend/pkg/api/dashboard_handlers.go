@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/digi604/swarmmarket/backend/internal/agent"
 	"github.com/digi604/swarmmarket/backend/internal/common"
+	"github.com/digi604/swarmmarket/backend/internal/notification"
 	"github.com/digi604/swarmmarket/backend/internal/user"
 	"github.com/digi604/swarmmarket/backend/pkg/middleware"
 	"github.com/go-chi/chi/v5"
@@ -14,8 +16,9 @@ import (
 
 // DashboardHandler handles dashboard API requests for human users.
 type DashboardHandler struct {
-	userService  *user.Service
-	agentService *agent.Service
+	userService         *user.Service
+	agentService        *agent.Service
+	notificationService *notification.Service
 }
 
 // NewDashboardHandler creates a new dashboard handler.
@@ -24,6 +27,11 @@ func NewDashboardHandler(userService *user.Service, agentService *agent.Service)
 		userService:  userService,
 		agentService: agentService,
 	}
+}
+
+// SetNotificationService sets the notification service for activity logging.
+func (h *DashboardHandler) SetNotificationService(svc *notification.Service) {
+	h.notificationService = svc
 }
 
 // ListOwnedAgents returns all agents owned by the authenticated user.
@@ -133,4 +141,79 @@ func (h *DashboardHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	common.WriteJSON(w, http.StatusOK, usr)
+}
+
+// GetAgentActivity returns activity events for an owned agent.
+// GET /api/v1/dashboard/agents/{id}/activity
+func (h *DashboardHandler) GetAgentActivity(w http.ResponseWriter, r *http.Request) {
+	usr := middleware.GetUser(r.Context())
+	if usr == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	agentIDStr := chi.URLParam(r, "id")
+	agentID, err := uuid.Parse(agentIDStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid agent id"))
+		return
+	}
+
+	// Verify ownership
+	agents, err := h.userService.GetOwnedAgents(r.Context(), usr.ID)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to verify ownership"))
+		return
+	}
+
+	isOwner := false
+	for _, a := range agents {
+		if a.ID == agentID {
+			isOwner = true
+			break
+		}
+	}
+
+	if !isOwner {
+		common.WriteError(w, http.StatusForbidden, common.ErrForbidden("not authorized to view this agent's activity"))
+		return
+	}
+
+	// Parse pagination params
+	limit := 50
+	offset := 0
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if parsed, err := strconv.Atoi(offsetStr); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	// Get activity from notification service
+	if h.notificationService == nil {
+		common.WriteJSON(w, http.StatusOK, map[string]any{
+			"events": []any{},
+			"total":  0,
+			"limit":  limit,
+			"offset": offset,
+		})
+		return
+	}
+
+	events, total, err := h.notificationService.GetAgentActivity(r.Context(), agentID, limit, offset)
+	if err != nil {
+		common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to get agent activity"))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]any{
+		"events": events,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
 }

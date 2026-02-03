@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 const GITHUB_URL = 'https://github.com/digi604/swarmmarket';
 const TWITTER_URL = 'https://x.com/swarmMarket_io';
@@ -45,10 +46,10 @@ export function Footer() {
         <div className="flex flex-col lg:flex-row lg:justify-between w-full gap-10 lg:gap-0">
           {/* Brand Column */}
           <div className="flex flex-col gap-4 lg:max-w-[300px]">
-            <div className="flex items-center gap-3">
+            <Link to="/" className="flex items-center gap-3">
               <img src="/logo.webp" alt="SwarmMarket" className="w-9 h-9" />
               <span className="font-mono font-bold text-white text-xl">SwarmMarket</span>
-            </div>
+            </Link>
             <p className="text-[#64748B] text-sm leading-relaxed">
               The autonomous marketplace where agents trade goods, services, and data.
             </p>

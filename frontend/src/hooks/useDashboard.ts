@@ -10,6 +10,7 @@ import type {
   Rating,
   WalletBalance,
   Deposit,
+  ActivityEvent,
 } from '../lib/api';
 
 export function useApiSetup() {
@@ -549,6 +550,69 @@ export function useAgentRatings(agentId: string | null) {
   }, [transactions]);
 
   return { ratings, loading: txLoading || loading };
+}
+
+// Fetch activity events for a specific agent
+export function useAgentActivity(agentId: string | null, limit = 50) {
+  const isAuthReady = useAuthReady();
+  const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refetch = useCallback(() => {
+    if (!agentId || !isAuthReady) {
+      setEvents([]);
+      setTotal(0);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    api
+      .getAgentActivity(agentId, { limit })
+      .then((data) => {
+        setEvents(data.events || []);
+        setTotal(data.total || 0);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [agentId, isAuthReady, limit]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  // Group events by date for display
+  const groupedEvents = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const todayItems: ActivityEvent[] = [];
+    const yesterdayItems: ActivityEvent[] = [];
+    const earlierItems: ActivityEvent[] = [];
+
+    events.forEach((event) => {
+      const eventDate = new Date(event.created_at);
+      eventDate.setHours(0, 0, 0, 0);
+
+      if (eventDate.getTime() === today.getTime()) {
+        todayItems.push(event);
+      } else if (eventDate.getTime() === yesterday.getTime()) {
+        yesterdayItems.push(event);
+      } else {
+        earlierItems.push(event);
+      }
+    });
+
+    return { today: todayItems, yesterday: yesterdayItems, earlier: earlierItems };
+  }, [events]);
+
+  return { events, groupedEvents, total, loading, error, refetch };
 }
 
 // Utility function

@@ -18,6 +18,7 @@ import (
 // Service handles event publishing and notification delivery.
 type Service struct {
 	redis      *redis.Client
+	repo       *Repository
 	httpClient *http.Client
 }
 
@@ -31,6 +32,22 @@ func NewService(redisClient *redis.Client) *Service {
 	}
 }
 
+// NewServiceWithRepo creates a new notification service with database persistence.
+func NewServiceWithRepo(redisClient *redis.Client, repo *Repository) *Service {
+	return &Service{
+		redis: redisClient,
+		repo:  repo,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}
+}
+
+// SetRepository sets the repository for event persistence.
+func (s *Service) SetRepository(repo *Repository) {
+	s.repo = repo
+}
+
 // Publish publishes an event to Redis streams and triggers notifications.
 func (s *Service) Publish(ctx context.Context, eventType string, payload map[string]any) error {
 	event := Event{
@@ -38,6 +55,21 @@ func (s *Service) Publish(ctx context.Context, eventType string, payload map[str
 		Type:      EventType(eventType),
 		Payload:   payload,
 		CreatedAt: time.Now().UTC(),
+	}
+
+	// Extract agent IDs that should be associated with this event
+	agentIDs := extractAgentIDs(payload)
+
+	// Persist event to database for activity logging (one row per agent involved)
+	if s.repo != nil {
+		for _, agentID := range agentIDs {
+			eventCopy := event
+			eventCopy.AgentID = agentID
+			if err := s.repo.InsertEvent(ctx, &eventCopy); err != nil {
+				// Log but don't fail - Redis is the primary delivery
+				fmt.Printf("failed to persist event to database: %v\n", err)
+			}
+		}
 	}
 
 	// Serialize event
@@ -65,15 +97,50 @@ func (s *Service) Publish(ctx context.Context, eventType string, payload map[str
 		fmt.Printf("failed to publish to pubsub: %v\n", err)
 	}
 
-	// If there's a specific agent to notify, publish to their channel
-	if agentID, ok := payload["requester_id"].(uuid.UUID); ok {
-		s.notifyAgent(ctx, agentID, event)
-	}
-	if agentID, ok := payload["offerer_id"].(uuid.UUID); ok {
+	// If there are specific agents to notify, publish to their channels
+	for _, agentID := range agentIDs {
 		s.notifyAgent(ctx, agentID, event)
 	}
 
 	return nil
+}
+
+func extractAgentIDs(payload map[string]any) []uuid.UUID {
+	keys := []string{
+		"requester_id",
+		"offerer_id",
+		"seller_id",
+		"buyer_id",
+		"agent_id",
+		"bidder_id",
+		"winner_id",
+	}
+
+	ids := make(map[uuid.UUID]struct{})
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+
+		switch v := value.(type) {
+		case uuid.UUID:
+			if v != uuid.Nil {
+				ids[v] = struct{}{}
+			}
+		case string:
+			if parsed, err := uuid.Parse(v); err == nil {
+				ids[parsed] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]uuid.UUID, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+
+	return result
 }
 
 // notifyAgent sends a notification to a specific agent.
@@ -168,4 +235,23 @@ func (s *Service) BroadcastToScope(ctx context.Context, scope string, event Even
 	eventJSON, _ := json.Marshal(event)
 	scopeChannel := fmt.Sprintf("scope:%s:events", scope)
 	s.redis.Publish(ctx, scopeChannel, eventJSON)
+}
+
+// GetAgentActivity retrieves activity events for an agent.
+func (s *Service) GetAgentActivity(ctx context.Context, agentID uuid.UUID, limit, offset int) ([]*ActivityEvent, int, error) {
+	if s.repo == nil {
+		return []*ActivityEvent{}, 0, nil
+	}
+
+	events, err := s.repo.GetAgentActivity(ctx, agentID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	count, err := s.repo.GetAgentActivityCount(ctx, agentID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return events, count, nil
 }

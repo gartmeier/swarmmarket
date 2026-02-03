@@ -446,17 +446,16 @@ func (r *Repository) SearchRequests(ctx context.Context, params SearchRequestsPa
 		offset = 0
 	}
 
-	// Determine sort order
+	// Determine sort order - use allowlist to prevent SQL injection
 	orderBy := "r.created_at DESC" // default: newest
-	switch params.SortBy {
-	case "budget_high":
-		orderBy = "COALESCE(r.budget_max, r.budget_min, 0) DESC, r.created_at DESC"
-	case "budget_low":
-		orderBy = "COALESCE(r.budget_min, r.budget_max, 0) ASC, r.created_at DESC"
-	case "ending_soon":
-		orderBy = "r.expires_at ASC NULLS LAST, r.created_at DESC"
-	case "newest":
-		orderBy = "r.created_at DESC"
+	allowedSortOptions := map[string]string{
+		"budget_high": "COALESCE(r.budget_max, r.budget_min, 0) DESC, r.created_at DESC",
+		"budget_low":  "COALESCE(r.budget_min, r.budget_max, 0) ASC, r.created_at DESC",
+		"ending_soon": "r.expires_at ASC NULLS LAST, r.created_at DESC",
+		"newest":      "r.created_at DESC",
+	}
+	if sortClause, ok := allowedSortOptions[params.SortBy]; ok {
+		orderBy = sortClause
 	}
 
 	query := fmt.Sprintf(`
@@ -506,6 +505,97 @@ func (r *Repository) SearchRequests(ctx context.Context, params SearchRequestsPa
 		Limit:  limit,
 		Offset: offset,
 	}, nil
+}
+
+// UpdateRequest updates a request (only by the requester, only if still open).
+func (r *Repository) UpdateRequest(ctx context.Context, id uuid.UUID, requesterID uuid.UUID, updates *UpdateRequestRequest) (*Request, error) {
+	// Build dynamic update query
+	var setClauses []string
+	var args []interface{}
+	argNum := 1
+
+	if updates.Title != nil {
+		setClauses = append(setClauses, fmt.Sprintf("title = $%d", argNum))
+		args = append(args, *updates.Title)
+		argNum++
+	}
+	if updates.Description != nil {
+		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argNum))
+		args = append(args, *updates.Description)
+		argNum++
+	}
+	if updates.BudgetMin != nil {
+		setClauses = append(setClauses, fmt.Sprintf("budget_min = $%d", argNum))
+		args = append(args, *updates.BudgetMin)
+		argNum++
+	}
+	if updates.BudgetMax != nil {
+		setClauses = append(setClauses, fmt.Sprintf("budget_max = $%d", argNum))
+		args = append(args, *updates.BudgetMax)
+		argNum++
+	}
+	if updates.Quantity != nil {
+		setClauses = append(setClauses, fmt.Sprintf("quantity = $%d", argNum))
+		args = append(args, *updates.Quantity)
+		argNum++
+	}
+	if updates.GeographicScope != nil {
+		setClauses = append(setClauses, fmt.Sprintf("geographic_scope = $%d", argNum))
+		args = append(args, *updates.GeographicScope)
+		argNum++
+	}
+	if updates.LocationLat != nil {
+		setClauses = append(setClauses, fmt.Sprintf("location_lat = $%d", argNum))
+		args = append(args, *updates.LocationLat)
+		argNum++
+	}
+	if updates.LocationLng != nil {
+		setClauses = append(setClauses, fmt.Sprintf("location_lng = $%d", argNum))
+		args = append(args, *updates.LocationLng)
+		argNum++
+	}
+	if updates.LocationRadius != nil {
+		setClauses = append(setClauses, fmt.Sprintf("location_radius_km = $%d", argNum))
+		args = append(args, *updates.LocationRadius)
+		argNum++
+	}
+	if updates.Metadata != nil {
+		setClauses = append(setClauses, fmt.Sprintf("metadata = $%d", argNum))
+		args = append(args, updates.Metadata)
+		argNum++
+	}
+
+	if len(setClauses) == 0 {
+		// Nothing to update, just return the current request
+		return r.GetRequestByID(ctx, id)
+	}
+
+	// Always update updated_at
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argNum))
+	args = append(args, time.Now().UTC())
+	argNum++
+
+	// Add WHERE conditions
+	args = append(args, id, requesterID, RequestStatusOpen)
+
+	query := fmt.Sprintf(`
+		UPDATE requests
+		SET %s
+		WHERE id = $%d AND requester_id = $%d AND status = $%d
+		RETURNING id
+	`, strings.Join(setClauses, ", "), argNum, argNum+1, argNum+2)
+
+	var returnedID uuid.UUID
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&returnedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRequestNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Return the updated request
+	return r.GetRequestByID(ctx, id)
 }
 
 // --- Offers ---
@@ -721,6 +811,112 @@ func (r *Repository) GetCommentReplies(ctx context.Context, parentID uuid.UUID) 
 // DeleteComment deletes a comment (only by the author).
 func (r *Repository) DeleteComment(ctx context.Context, commentID, agentID uuid.UUID) error {
 	query := `DELETE FROM listing_comments WHERE id = $1 AND agent_id = $2`
+	result, err := r.pool.Exec(ctx, query, commentID, agentID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("comment not found or not authorized")
+	}
+	return nil
+}
+
+// --- Request Comments ---
+
+// CreateRequestComment creates a new comment on a request.
+func (r *Repository) CreateRequestComment(ctx context.Context, comment *Comment) error {
+	query := `
+		INSERT INTO request_comments (id, request_id, agent_id, parent_id, content, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`
+	_, err := r.pool.Exec(ctx, query,
+		comment.ID, comment.RequestID, comment.AgentID, comment.ParentID,
+		comment.Content, comment.CreatedAt, comment.UpdatedAt,
+	)
+	return err
+}
+
+// GetCommentsByRequestID retrieves all top-level comments for a request.
+func (r *Repository) GetCommentsByRequestID(ctx context.Context, requestID uuid.UUID, limit, offset int) ([]Comment, int, error) {
+	// Get total count
+	var total int
+	countQuery := `SELECT COUNT(*) FROM request_comments WHERE request_id = $1 AND parent_id IS NULL`
+	if err := r.pool.QueryRow(ctx, countQuery, requestID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := `
+		SELECT c.id, c.request_id, c.agent_id, c.parent_id, c.content, c.created_at, c.updated_at,
+			COALESCE(a.name, '') as agent_name,
+			a.avatar_url as agent_avatar_url,
+			(SELECT COUNT(*) FROM request_comments WHERE parent_id = c.id) as reply_count
+		FROM request_comments c
+		LEFT JOIN agents a ON c.agent_id = a.id
+		WHERE c.request_id = $1 AND c.parent_id IS NULL
+		ORDER BY c.created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+	rows, err := r.pool.Query(ctx, query, requestID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var comments []Comment
+	for rows.Next() {
+		var c Comment
+		if err := rows.Scan(
+			&c.ID, &c.RequestID, &c.AgentID, &c.ParentID, &c.Content,
+			&c.CreatedAt, &c.UpdatedAt, &c.AgentName, &c.AgentAvatarURL, &c.ReplyCount,
+		); err != nil {
+			return nil, 0, err
+		}
+		comments = append(comments, c)
+	}
+
+	return comments, total, nil
+}
+
+// GetRequestCommentReplies retrieves replies to a request comment.
+func (r *Repository) GetRequestCommentReplies(ctx context.Context, parentID uuid.UUID) ([]Comment, error) {
+	query := `
+		SELECT c.id, c.request_id, c.agent_id, c.parent_id, c.content, c.created_at, c.updated_at,
+			COALESCE(a.name, '') as agent_name,
+			a.avatar_url as agent_avatar_url,
+			0 as reply_count
+		FROM request_comments c
+		LEFT JOIN agents a ON c.agent_id = a.id
+		WHERE c.parent_id = $1
+		ORDER BY c.created_at ASC
+	`
+	rows, err := r.pool.Query(ctx, query, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var comments []Comment
+	for rows.Next() {
+		var c Comment
+		if err := rows.Scan(
+			&c.ID, &c.RequestID, &c.AgentID, &c.ParentID, &c.Content,
+			&c.CreatedAt, &c.UpdatedAt, &c.AgentName, &c.AgentAvatarURL, &c.ReplyCount,
+		); err != nil {
+			return nil, err
+		}
+		comments = append(comments, c)
+	}
+
+	return comments, nil
+}
+
+// DeleteRequestComment deletes a request comment.
+func (r *Repository) DeleteRequestComment(ctx context.Context, commentID, agentID uuid.UUID) error {
+	query := `DELETE FROM request_comments WHERE id = $1 AND agent_id = $2`
 	result, err := r.pool.Exec(ctx, query, commentID, agentID)
 	if err != nil {
 		return err

@@ -194,6 +194,19 @@ func (r *Repository) UpdateLastSeen(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+// UpdateAvatarURL updates the agent's avatar URL.
+func (r *Repository) UpdateAvatarURL(ctx context.Context, id uuid.UUID, avatarURL string) error {
+	query := `UPDATE agents SET avatar_url = $2, updated_at = $3 WHERE id = $1`
+	result, err := r.pool.Exec(ctx, query, id, avatarURL, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("failed to update avatar: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrAgentNotFound
+	}
+	return nil
+}
+
 // Deactivate deactivates an agent (soft delete).
 func (r *Repository) Deactivate(ctx context.Context, id uuid.UUID) error {
 	query := `UPDATE agents SET is_active = false, updated_at = $2 WHERE id = $1`

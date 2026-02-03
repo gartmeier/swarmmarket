@@ -146,6 +146,44 @@ func (h *MarketplaceHandler) DeleteListing(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// PurchaseListing handles purchasing a listing.
+func (h *MarketplaceHandler) PurchaseListing(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.GetAgent(r.Context())
+	if agent == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	listingIDStr := chi.URLParam(r, "id")
+	listingID, err := uuid.Parse(listingIDStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid listing id"))
+		return
+	}
+
+	var req marketplace.PurchaseListingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Default to quantity of 1 if no body provided
+		req.Quantity = 1
+	}
+	if req.Quantity <= 0 {
+		req.Quantity = 1
+	}
+
+	result, err := h.service.PurchaseListing(r.Context(), agent.ID, listingID, req.Quantity)
+	if err != nil {
+		if err == marketplace.ErrListingNotFound {
+			common.WriteError(w, http.StatusNotFound, common.ErrNotFound("listing not found"))
+			return
+		}
+		log.Printf("[ERROR] PurchaseListing failed: %v (listingID=%s, agentID=%s)", err, listingID, agent.ID)
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest(err.Error()))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusCreated, result)
+}
+
 // --- Requests ---
 
 // CreateRequest handles creating a new request.
@@ -193,6 +231,41 @@ func (h *MarketplaceHandler) GetRequest(w http.ResponseWriter, r *http.Request) 
 		}
 		log.Printf("[ERROR] GetRequest failed: %v (idOrSlug=%s)", err, idOrSlug)
 		common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to get request"))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, request)
+}
+
+// UpdateRequest handles updating a request.
+func (h *MarketplaceHandler) UpdateRequest(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.GetAgent(r.Context())
+	if agent == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid request id"))
+		return
+	}
+
+	var req marketplace.UpdateRequestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid request body"))
+		return
+	}
+
+	request, err := h.service.UpdateRequest(r.Context(), agent.ID, id, &req)
+	if err != nil {
+		if err == marketplace.ErrRequestNotFound {
+			common.WriteError(w, http.StatusNotFound, common.ErrNotFound("request not found"))
+			return
+		}
+		log.Printf("[ERROR] UpdateRequest failed: %v (id=%s, agentID=%s)", err, id, agent.ID)
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest(err.Error()))
 		return
 	}
 
@@ -410,6 +483,102 @@ func (h *MarketplaceHandler) DeleteComment(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.service.DeleteComment(r.Context(), commentID, agent.ID); err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest(err.Error()))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// --- Request Comments ---
+
+// CreateRequestComment handles creating a new comment on a request.
+func (h *MarketplaceHandler) CreateRequestComment(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.GetAgent(r.Context())
+	if agent == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	requestIDStr := chi.URLParam(r, "id")
+	requestID, err := uuid.Parse(requestIDStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid request id"))
+		return
+	}
+
+	var req marketplace.CreateCommentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid request body"))
+		return
+	}
+
+	comment, err := h.service.CreateRequestComment(r.Context(), agent.ID, requestID, &req)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest(err.Error()))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusCreated, comment)
+}
+
+// GetRequestComments handles getting comments for a request.
+func (h *MarketplaceHandler) GetRequestComments(w http.ResponseWriter, r *http.Request) {
+	requestIDStr := chi.URLParam(r, "id")
+	requestID, err := uuid.Parse(requestIDStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid request id"))
+		return
+	}
+
+	limit := parseIntParam(r, "limit", 20)
+	offset := parseIntParam(r, "offset", 0)
+
+	result, err := h.service.GetRequestComments(r.Context(), requestID, limit, offset)
+	if err != nil {
+		log.Printf("[ERROR] GetRequestComments failed: %v (requestID=%s)", err, requestID)
+		common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to get comments"))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, result)
+}
+
+// GetRequestCommentReplies handles getting replies to a request comment.
+func (h *MarketplaceHandler) GetRequestCommentReplies(w http.ResponseWriter, r *http.Request) {
+	commentIDStr := chi.URLParam(r, "commentId")
+	commentID, err := uuid.Parse(commentIDStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid comment id"))
+		return
+	}
+
+	replies, err := h.service.GetRequestCommentReplies(r.Context(), commentID)
+	if err != nil {
+		log.Printf("[ERROR] GetRequestCommentReplies failed: %v (commentID=%s)", err, commentID)
+		common.WriteError(w, http.StatusInternalServerError, common.ErrInternalServer("failed to get replies"))
+		return
+	}
+
+	common.WriteJSON(w, http.StatusOK, map[string]any{"replies": replies})
+}
+
+// DeleteRequestComment handles deleting a request comment.
+func (h *MarketplaceHandler) DeleteRequestComment(w http.ResponseWriter, r *http.Request) {
+	agent := middleware.GetAgent(r.Context())
+	if agent == nil {
+		common.WriteError(w, http.StatusUnauthorized, common.ErrUnauthorized("not authenticated"))
+		return
+	}
+
+	commentIDStr := chi.URLParam(r, "commentId")
+	commentID, err := uuid.Parse(commentIDStr)
+	if err != nil {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("invalid comment id"))
+		return
+	}
+
+	if err := h.service.DeleteRequestComment(r.Context(), commentID, agent.ID); err != nil {
 		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest(err.Error()))
 		return
 	}

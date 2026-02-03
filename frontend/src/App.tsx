@@ -15,6 +15,7 @@ import { DashboardHome } from './components/dashboard/DashboardHome';
 import { SettingsPage } from './components/dashboard/SettingsPage';
 import { BotDetailPage } from './components/dashboard/BotDetailPage';
 import { PublicMarketplace } from './components/PublicMarketplace';
+import { PublicMarketplaceLayout } from './components/PublicMarketplaceLayout';
 import { MarketplacePage, ListingDetailPage, RequestDetailPage, AuctionDetailPage } from './components/marketplace';
 import { NotFoundPage } from './components/NotFoundPage';
 import { ErrorBoundary } from './components/ErrorPage';
@@ -55,6 +56,31 @@ function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/marketplace" element={<PublicMarketplace />} />
+        {/* Public marketplace detail pages - no login required */}
+        <Route
+          path="/marketplace/listings/:id"
+          element={
+            <PublicMarketplaceLayout>
+              <ListingDetailPage />
+            </PublicMarketplaceLayout>
+          }
+        />
+        <Route
+          path="/marketplace/requests/:id"
+          element={
+            <PublicMarketplaceLayout>
+              <RequestDetailPage />
+            </PublicMarketplaceLayout>
+          }
+        />
+        <Route
+          path="/marketplace/auctions/:id"
+          element={
+            <PublicMarketplaceLayout>
+              <AuctionDetailPage />
+            </PublicMarketplaceLayout>
+          }
+        />
         <Route
           path="/dashboard"
           element={

@@ -239,10 +239,11 @@ type ListResult[T any] struct {
 
 // --- Comments ---
 
-// Comment represents a comment/message on a listing.
+// Comment represents a comment/message on a listing or request.
 type Comment struct {
 	ID        uuid.UUID  `json:"id"`
-	ListingID uuid.UUID  `json:"listing_id"`
+	ListingID *uuid.UUID `json:"listing_id,omitempty"`
+	RequestID *uuid.UUID `json:"request_id,omitempty"`
 	AgentID   uuid.UUID  `json:"agent_id"`
 	ParentID  *uuid.UUID `json:"parent_id,omitempty"`
 	Content   string     `json:"content"`
@@ -270,6 +271,20 @@ type CommentsResponse struct {
 // PurchaseListingRequest is the request body for purchasing a listing.
 type PurchaseListingRequest struct {
 	Quantity int `json:"quantity"`
+}
+
+// UpdateRequestRequest is the request body for updating a request.
+type UpdateRequestRequest struct {
+	Title           *string          `json:"title,omitempty"`
+	Description     *string          `json:"description,omitempty"`
+	BudgetMin       *float64         `json:"budget_min,omitempty"`
+	BudgetMax       *float64         `json:"budget_max,omitempty"`
+	Quantity        *int             `json:"quantity,omitempty"`
+	GeographicScope *GeographicScope `json:"geographic_scope,omitempty"`
+	LocationLat     *float64         `json:"location_lat,omitempty"`
+	LocationLng     *float64         `json:"location_lng,omitempty"`
+	LocationRadius  *int             `json:"location_radius_km,omitempty"`
+	Metadata        map[string]any   `json:"metadata,omitempty"`
 }
 
 // PurchaseResult is the result of purchasing a listing.

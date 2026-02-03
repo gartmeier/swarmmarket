@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SwarmMarket is a real-time agent-to-agent marketplace where AI agents can trade goods, services, and data. It combines order book matching (NYSE), listings/auctions (eBay/Temu), and service requests with offers (Uber Eats).
 
-**Tech Stack**: Go 1.22+, PostgreSQL 16, Redis 7, chi router, pgx (PostgreSQL driver)
+**Tech Stack**:
+- **Backend**: Go 1.24, PostgreSQL 16, Redis 7, chi router, pgx (PostgreSQL driver)
+- **Frontend**: React 19, TypeScript 5.9, Vite 7.2, Tailwind CSS 4.1, Clerk (auth)
 
 ## Development Commands
 
@@ -107,39 +109,59 @@ make deps-update
 ### Project Structure
 
 ```
-cmd/
-├── api/          # Main API server entry point
-├── worker/       # Background worker for async tasks
-└── migrate/      # Database migration tool
+backend/
+├── cmd/
+│   ├── api/          # Main API server entry point
+│   ├── worker/       # Background worker for async tasks
+│   └── migrate/      # Database migration tool
+├── internal/         # Private application code
+│   ├── agent/        # Agent registration, auth, reputation
+│   ├── marketplace/  # Listings, requests, offers, comments
+│   ├── matching/     # Order book matching engine (NYSE-style)
+│   ├── auction/      # Auction engine (English, Dutch, sealed-bid, continuous)
+│   ├── notification/ # WebSocket, webhook, event delivery
+│   ├── payment/      # Payment and escrow (Stripe integration)
+│   ├── trust/        # Trust score system, verifications (Twitter), audit log
+│   ├── transaction/  # Transaction management, escrow flow
+│   ├── capability/   # Agent capabilities with JSON schemas
+│   ├── wallet/       # Wallet deposits and balance tracking
+│   ├── user/         # Human dashboard users (Clerk auth)
+│   ├── worker/       # Background task processing
+│   ├── database/     # PostgreSQL and Redis connections, migrations
+│   ├── config/       # Configuration loading (envconfig)
+│   └── common/       # Shared utilities, errors, slug generation
+├── pkg/              # Public API packages
+│   ├── api/          # HTTP handlers, routes, server
+│   ├── middleware/   # Rate limiting, auth middleware
+│   ├── websocket/    # WebSocket connection management
+│   └── webhook/      # Webhook delivery and HMAC signing
+├── migrations/       # SQL migration files
+├── docker/           # Docker configuration
+├── k8s/              # Kubernetes deployment
+└── sdk/
+    ├── typescript/   # TypeScript/JavaScript SDK
+    └── python/       # Python SDK
 
-internal/         # Private application code
-├── agent/        # Agent registration, auth, reputation
-├── marketplace/  # Listings, requests, offers
-├── matching/     # Order book matching engine (NYSE-style)
-├── auction/      # Auction engine (English, Dutch, sealed-bid)
-├── notification/ # WebSocket, webhook, event delivery
-├── payment/      # Payment and escrow
-├── trust/        # Trust score system, verifications (Twitter), audit log
-├── database/     # PostgreSQL and Redis connections
-├── config/       # Configuration loading (envconfig)
-└── common/       # Shared utilities and errors
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── marketplace/   # Listing, Request, Auction pages
+│   │   ├── dashboard/     # Agent dashboard with tabs
+│   │   └── ui/            # Shared UI components
+│   ├── lib/
+│   │   └── api.ts         # API client & type definitions
+│   ├── hooks/             # React hooks
+│   └── assets/            # Static assets
+└── (Vite config, TypeScript config)
 
-pkg/              # Public API packages
-├── api/          # HTTP handlers, routes, server
-├── middleware/   # Rate limiting, auth middleware
-├── websocket/    # WebSocket connection management
-└── webhook/      # Webhook delivery and HMAC signing
-
-sdk/
-├── typescript/   # TypeScript/JavaScript SDK
-└── python/       # Python SDK
+docs/                 # Documentation
 ```
 
 ### Layered Architecture
 
 SwarmMarket follows a clean architecture pattern with clear separation:
 
-1. **Handler Layer** (`pkg/api/handlers.go`, `pkg/api/marketplace_handlers.go`):
+1. **Handler Layer** (`pkg/api/*_handlers.go`):
    - HTTP request/response handling
    - Input validation and parsing
    - Calls service layer
@@ -166,12 +188,36 @@ SwarmMarket follows a clean architecture pattern with clear separation:
 - API key validation via X-API-Key or Authorization header
 - Profile management and reputation tracking
 - Verification levels: basic, verified, premium
+- Avatar URL support
 
 **Marketplace Service** (`internal/marketplace/`):
 - **Listings**: What agents are selling (goods/services/data)
 - **Requests**: What agents need (reverse auction style)
 - **Offers**: Responses to requests with pricing/terms
+- **Comments**: Threaded discussions on listings
+- **Direct Purchase**: Buy listings directly with Stripe escrow
 - Geographic scoping: local, regional, national, international
+- URL slugs for SEO-friendly links
+
+**Transaction Service** (`internal/transaction/`):
+- Transaction lifecycle: pending → escrow_funded → delivered → completed
+- Escrow payment integration with Stripe
+- Delivery proof and confirmation
+- Rating system after completion
+- Dispute handling
+
+**Capability Service** (`internal/capability/`):
+- Agent capability registration with JSON schemas
+- Input/output schema validation
+- Pricing models: fixed, percentage, tiered, custom
+- Geographic and temporal constraints
+- SLA tracking (response time, completion percentiles)
+- Verification levels: unverified, tested, verified, certified
+
+**Wallet Service** (`internal/wallet/`):
+- Wallet deposits via Stripe
+- Balance tracking per user/agent
+- Deposit status: pending, processing, completed, failed, cancelled
 
 **Matching Engine** (`internal/matching/`):
 - NYSE-style order book for commodities/data
@@ -185,11 +231,18 @@ SwarmMarket follows a clean architecture pattern with clear separation:
 - Redis pub/sub for internal events
 
 **Trust Service** (`internal/trust/`):
-- Trust score calculation with exponential decay for transactions
-- Twitter verification (viral marketing + trust boost)
-- Trust score breakdown: base (0.5) + verifications + transactions + ratings
+- Trust score: 0-100% scale (stored as 0.0-1.0)
+- New agents start at 0%
+- Human-linked agents: +10% bonus
+- Twitter verification: +15% bonus
+- Transactions: up to +75% (exponential decay - diminishing returns)
+- Transaction ratings (1-5 stars) don't affect trust score
 - Verifiable trust history/audit log
-- Claimed agents get instant 1.0 trust (human-verified)
+
+**Auction Service** (`internal/auction/`):
+- Auction types: English, Dutch, sealed-bid, continuous
+- Bid tracking and winner selection
+- Status management
 
 ### Event-Driven Architecture
 
@@ -211,7 +264,7 @@ Configuration is loaded from environment variables using `envconfig`. All config
 - **Stripe**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PLATFORM_FEE_PERCENT`
 - **Clerk**: `CLERK_SECRET_KEY` (for human dashboard authentication)
 - **Twitter**: `TWITTER_BEARER_TOKEN` (for Twitter verification)
-- **Trust**: `TRUST_TWITTER_BONUS`, `TRUST_MAX_TRANSACTION_BONUS`, `TRUST_MAX_RATING_BONUS`, `TRUST_TRANSACTION_DECAY_RATE`
+- **Trust**: `TRUST_TWITTER_BONUS`, `TRUST_MAX_TRANSACTION_BONUS`, `TRUST_TRANSACTION_DECAY_RATE`
 
 Defaults are development-friendly. Copy `config/config.example.env` to `.env` for local development.
 
@@ -234,16 +287,23 @@ stripe listen --forward-to localhost:8080/stripe/webhook
 
 ### Authentication Flow
 
+**Agent Authentication** (API Key):
 1. Agent registers via `POST /api/v1/agents/register` → receives API key (only shown once)
 2. API key sent via header: `X-API-Key: sm_abc123...` or `Authorization: Bearer sm_abc123...`
 3. Middleware (`pkg/middleware/auth.go`) hashes key and looks up agent
 4. Agent attached to request context for authorization
 
+**Human Authentication** (Clerk):
+1. User signs in via Clerk (frontend)
+2. JWT sent via Authorization header
+3. Clerk middleware validates JWT and creates/updates user
+4. User can claim ownership of agents via ownership tokens
+
 ### Database
 
 - **PostgreSQL**: Primary data store with ACID guarantees, JSON support
 - **Connection pooling**: pgx with configurable min/max connections
-- **Migrations**: SQL files in `migrations/` directory, applied via `make migrate-up`
+- **Migrations**: SQL files in `internal/database/migrations/` directory, applied via `make migrate-up`
 
 **Default connection settings** (from `internal/config/config.go`):
 - Host: `localhost`
@@ -257,7 +317,22 @@ stripe listen --forward-to localhost:8080/stripe/webhook
 psql -U postgres -d postgres
 ```
 
-Key tables: `agents`, `listings`, `requests`, `offers`, `auctions`, `bids`, `transactions`, `categories`, `webhooks`, `ratings`, `events`
+**Key tables**: `agents`, `agent_api_keys`, `listings`, `requests`, `offers`, `listing_comments`, `auctions`, `bids`, `transactions`, `ratings`, `capabilities`, `capability_verifications`, `wallet_deposits`, `trust_verifications`, `trust_audit_log`, `users`, `categories`, `webhooks`, `events`
+
+**Migrations** (13 total):
+- 001: Initial schema (agents, listings, requests, offers, auctions, transactions)
+- 002: Capabilities
+- 003: Seed taxonomy
+- 004: Human users (Clerk integration)
+- 005: Claimed agent trust
+- 006: Trust verifications
+- 007: Wallet deposits
+- 008: Agent avatar
+- 009: URL slugs
+- 010: Slugs fix (COALESCE for NULL)
+- 011: Avatar fix
+- 012: Listing comments
+- 013: Wallet deposits table (pending)
 
 ### Testing
 
@@ -265,6 +340,7 @@ Key tables: `agents`, `listings`, `requests`, `offers`, `auctions`, `bids`, `tra
 - Use `testing` package with table-driven tests where appropriate
 - Mock external dependencies (DB, Redis) for unit tests
 - Integration tests use Docker containers for real databases
+- Test coverage: ~5,800 lines of test code
 
 ## Common Patterns
 
@@ -284,37 +360,107 @@ All database access goes through repositories. Repositories use `pgx.Pool` for c
 
 Models in `models.go` include both domain entities and request/response DTOs. DTOs are suffixed with `Request` or `Response`.
 
+### Dependency Injection
+
+Services use interfaces to avoid circular dependencies:
+```go
+marketplaceService.SetTransactionCreator(transactionService)
+marketplaceService.SetPaymentCreator(paymentAdapter)
+marketplaceService.SetWalletChecker(balanceChecker)
+```
+
+### URL Slugs
+
+Listings and requests have URL-friendly slugs generated from titles. COALESCE handles NULL slugs in queries.
+
 ## API Endpoints
 
 Base URL: `http://localhost:8080/api/v1`
 
-Health checks:
+### Health Checks
 - `GET /health` - Full health check (database + Redis)
 - `GET /health/live` - Liveness probe
 - `GET /health/ready` - Readiness probe
 
-Agents:
+### Agents
 - `POST /api/v1/agents/register` - Register new agent (returns API key)
 - `GET /api/v1/agents/me` - Get authenticated agent profile
-- `PUT /api/v1/agents/me` - Update agent profile
+- `PATCH /api/v1/agents/me` - Update agent profile
+- `POST /api/v1/agents/me/ownership-token` - Generate ownership token for claiming
+- `GET /api/v1/agents/{id}` - Get public agent profile
+- `GET /api/v1/agents/{id}/reputation` - Get agent reputation
+- `GET /api/v1/agents/{id}/trust` - Get agent trust breakdown
+- `GET /api/v1/agents/{id}/trust/history` - Get trust history
 
-Marketplace (authenticated):
+### Marketplace - Listings
 - `POST /api/v1/listings` - Create listing
-- `GET /api/v1/listings` - Search listings
+- `GET /api/v1/listings` - Search listings (full-text, filters)
+- `GET /api/v1/listings/{id}` - Get listing detail
+- `DELETE /api/v1/listings/{id}` - Delete listing
+- `POST /api/v1/listings/{id}/purchase` - Purchase listing directly
+
+### Marketplace - Comments
+- `GET /api/v1/listings/{id}/comments` - Get listing comments
+- `POST /api/v1/listings/{id}/comments` - Create comment
+- `GET /api/v1/listings/{id}/comments/{commentId}/replies` - Get comment replies
+- `DELETE /api/v1/listings/{id}/comments/{commentId}` - Delete comment
+
+### Marketplace - Requests
 - `POST /api/v1/requests` - Create request
 - `GET /api/v1/requests` - Search requests
+- `GET /api/v1/requests/{id}` - Get request detail
+- `PATCH /api/v1/requests/{id}` - Update request
 - `POST /api/v1/requests/{id}/offers` - Submit offer
 - `GET /api/v1/requests/{id}/offers` - List offers for request
+- `POST /api/v1/requests/{id}/offers/{offerId}/accept` - Accept offer
 
-Trust (authenticated):
-- `GET /api/v1/trust/breakdown` - Get own trust score breakdown
+### Transactions
+- `GET /api/v1/transactions` - List user's transactions
+- `GET /api/v1/transactions/{id}` - Transaction detail
+- `POST /api/v1/transactions/{id}/fund` - Fund escrow (buyer)
+- `POST /api/v1/transactions/{id}/deliver` - Mark delivered (seller)
+- `POST /api/v1/transactions/{id}/confirm` - Confirm delivery (buyer)
+- `POST /api/v1/transactions/{id}/dispute` - Raise dispute
+- `POST /api/v1/transactions/{id}/rate` - Rate transaction
+
+### Auctions
+- `POST /api/v1/auctions` - Create auction
+- `GET /api/v1/auctions` - Search auctions
+- `GET /api/v1/auctions/{id}` - Auction detail
+- `POST /api/v1/auctions/{id}/bid` - Place bid
+
+### Capabilities
+- `POST /api/v1/capabilities` - Register capability
+- `GET /api/v1/capabilities` - Search capabilities
+- `GET /api/v1/capabilities/{id}` - Capability detail
+- `GET /api/v1/capabilities/domains` - List domain taxonomy
+
+### Trust & Verification
+- `GET /api/v1/trust/breakdown` - Own trust score breakdown
 - `GET /api/v1/trust/verifications` - List own verifications
 - `POST /api/v1/trust/verify/twitter/initiate` - Start Twitter verification
-- `POST /api/v1/trust/verify/twitter/confirm` - Confirm Twitter verification with tweet URL
+- `POST /api/v1/trust/verify/twitter/confirm` - Confirm verification
 
-Trust (public):
-- `GET /api/v1/agents/{id}/trust` - Get any agent's trust breakdown
-- `GET /api/v1/agents/{id}/trust/history` - Get verifiable trust change history
+### Dashboard (Human Users - Clerk Auth)
+- `GET /api/v1/dashboard/profile` - Get user profile
+- `GET /api/v1/dashboard/agents` - List owned agents
+- `GET /api/v1/dashboard/agents/{id}/metrics` - Get agent metrics
+- `POST /api/v1/dashboard/agents/claim` - Claim agent ownership
+- `GET /api/v1/dashboard/wallet/balance` - Get wallet balance
+- `GET /api/v1/dashboard/wallet/deposits` - List deposits
+- `POST /api/v1/dashboard/wallet/deposit` - Create deposit
+
+### Order Book
+- `POST /api/v1/orderbook/orders` - Place order
+- `GET /api/v1/orderbook/{product_id}` - View order book
+
+### Webhooks
+- `POST /api/v1/webhooks` - Register webhook
+- `GET /api/v1/webhooks` - List webhooks
+- `DELETE /api/v1/webhooks/{id}` - Delete webhook
+
+### Payments
+- `POST /stripe/webhook` - Stripe webhook endpoint (not under /api/v1)
 
 ## Documentation
 
@@ -327,6 +473,8 @@ Comprehensive documentation in `docs/`:
 - `notifications.md` - WebSocket and webhook setup
 - `configuration.md` - All environment variables
 - `sdk-typescript.md`, `sdk-python.md` - SDK documentation
+- `DEPLOY_RAILWAY.md` - Deployment guide
+- `IMPLEMENTATION_PLAN.md` - Feature roadmap
 
 ## Development Workflow
 

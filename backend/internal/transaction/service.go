@@ -75,6 +75,36 @@ func (s *Service) CreateFromOffer(ctx context.Context, buyerID, sellerID uuid.UU
 	return tx.ID, nil
 }
 
+// CreateFromListing creates a transaction from a listing purchase (implements marketplace.ListingTransactionCreator).
+func (s *Service) CreateFromListing(ctx context.Context, buyerID, sellerID uuid.UUID, listingID *uuid.UUID, amount float64, currency string) (uuid.UUID, error) {
+	tx, err := s.CreateTransaction(ctx, &CreateTransactionRequest{
+		BuyerID:   buyerID,
+		SellerID:  sellerID,
+		ListingID: listingID,
+		Amount:    amount,
+		Currency:  currency,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return tx.ID, nil
+}
+
+// CreateFromTask creates a transaction from an accepted task (implements task.TransactionCreator).
+func (s *Service) CreateFromTask(ctx context.Context, requesterID, executorID uuid.UUID, taskID *uuid.UUID, amount float64, currency string) (uuid.UUID, error) {
+	tx, err := s.CreateTransaction(ctx, &CreateTransactionRequest{
+		BuyerID:  requesterID, // Requester pays
+		SellerID: executorID,  // Executor receives
+		TaskID:   taskID,
+		Amount:   amount,
+		Currency: currency,
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return tx.ID, nil
+}
+
 // CreateTransaction creates a new transaction (called when offer is accepted).
 func (s *Service) CreateTransaction(ctx context.Context, req *CreateTransactionRequest) (*Transaction, error) {
 	// Create the transaction
@@ -91,6 +121,13 @@ func (s *Service) CreateTransaction(ctx context.Context, req *CreateTransactionR
 
 	// Publish event
 	s.publishEvent(ctx, "transaction.created", map[string]any{
+		"transaction_id": tx.ID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+		"amount":         tx.Amount,
+		"currency":       tx.Currency,
+	})
+	s.publishEvent(ctx, "order.created", map[string]any{
 		"transaction_id": tx.ID,
 		"buyer_id":       tx.BuyerID,
 		"seller_id":      tx.SellerID,
@@ -171,6 +208,11 @@ func (s *Service) FundEscrow(ctx context.Context, transactionID, buyerID uuid.UU
 
 // ConfirmEscrowFunded is called when payment succeeds (via webhook or confirmation).
 func (s *Service) ConfirmEscrowFunded(ctx context.Context, transactionID uuid.UUID, paymentIntentID string) error {
+	tx, err := s.repo.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return err
+	}
+
 	// Update transaction status
 	if err := s.repo.UpdateTransactionStatus(ctx, transactionID, StatusEscrowFunded); err != nil {
 		return err
@@ -185,6 +227,18 @@ func (s *Service) ConfirmEscrowFunded(ctx context.Context, transactionID uuid.UU
 	// Publish event
 	s.publishEvent(ctx, "transaction.escrow_funded", map[string]any{
 		"transaction_id":    transactionID,
+		"buyer_id":          tx.BuyerID,
+		"seller_id":         tx.SellerID,
+		"amount":            tx.Amount,
+		"currency":          tx.Currency,
+		"payment_intent_id": paymentIntentID,
+	})
+	s.publishEvent(ctx, "escrow.funded", map[string]any{
+		"transaction_id":    transactionID,
+		"buyer_id":          tx.BuyerID,
+		"seller_id":         tx.SellerID,
+		"amount":            tx.Amount,
+		"currency":          tx.Currency,
 		"payment_intent_id": paymentIntentID,
 	})
 
@@ -263,6 +317,11 @@ func (s *Service) ConfirmDelivery(ctx context.Context, transactionID, agentID uu
 		"buyer_id":       tx.BuyerID,
 		"seller_id":      tx.SellerID,
 	})
+	s.publishEvent(ctx, "delivery.confirmed", map[string]any{
+		"transaction_id": transactionID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+	})
 
 	return tx, nil
 }
@@ -319,6 +378,13 @@ func (s *Service) CompleteTransaction(ctx context.Context, transactionID uuid.UU
 		"buyer_id":       tx.BuyerID,
 		"seller_id":      tx.SellerID,
 		"amount":         tx.Amount,
+	})
+	s.publishEvent(ctx, "payment.released", map[string]any{
+		"transaction_id": transactionID,
+		"buyer_id":       tx.BuyerID,
+		"seller_id":      tx.SellerID,
+		"amount":         tx.Amount,
+		"currency":       tx.Currency,
 	})
 
 	return tx, nil
@@ -466,6 +532,23 @@ func (s *Service) RefundTransaction(ctx context.Context, transactionID uuid.UUID
 	})
 
 	return nil
+}
+
+// PublishPaymentFailed emits a payment failure event for a transaction.
+func (s *Service) PublishPaymentFailed(ctx context.Context, tx *Transaction, paymentIntentID, reason string) {
+	if tx == nil {
+		return
+	}
+
+	s.publishEvent(ctx, "payment.failed", map[string]any{
+		"transaction_id":    tx.ID,
+		"buyer_id":          tx.BuyerID,
+		"seller_id":         tx.SellerID,
+		"amount":            tx.Amount,
+		"currency":          tx.Currency,
+		"payment_intent_id": paymentIntentID,
+		"reason":            reason,
+	})
 }
 
 // Helper to publish events asynchronously

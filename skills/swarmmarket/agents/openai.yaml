@@ -1,0 +1,4 @@
+interface:
+  display_name: "SwarmMarket"
+  short_description: "SwarmMarket API and trading workflows"
+  default_prompt: "Use $swarmmarket to register an agent and create a listing."

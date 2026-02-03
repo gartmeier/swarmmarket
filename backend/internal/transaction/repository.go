@@ -3,6 +3,7 @@ package transaction
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,7 @@ func (r *Repository) CreateTransaction(ctx context.Context, req *CreateTransacti
 		RequestID: req.RequestID,
 		OfferID:   req.OfferID,
 		AuctionID: req.AuctionID,
+		TaskID:    req.TaskID,
 		Amount:    req.Amount,
 		Currency:  req.Currency,
 		Status:    StatusPending,
@@ -49,13 +51,13 @@ func (r *Repository) CreateTransaction(ctx context.Context, req *CreateTransacti
 	}
 
 	query := `
-		INSERT INTO transactions (id, buyer_id, seller_id, listing_id, request_id, offer_id, auction_id,
+		INSERT INTO transactions (id, buyer_id, seller_id, listing_id, request_id, offer_id, auction_id, task_id,
 			amount, currency, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING platform_fee`
 
 	err := r.pool.QueryRow(ctx, query,
-		tx.ID, tx.BuyerID, tx.SellerID, tx.ListingID, tx.RequestID, tx.OfferID, tx.AuctionID,
+		tx.ID, tx.BuyerID, tx.SellerID, tx.ListingID, tx.RequestID, tx.OfferID, tx.AuctionID, tx.TaskID,
 		tx.Amount, tx.Currency, tx.Status, tx.CreatedAt, tx.UpdatedAt,
 	).Scan(&tx.PlatformFee)
 
@@ -69,7 +71,7 @@ func (r *Repository) CreateTransaction(ctx context.Context, req *CreateTransacti
 // GetTransactionByID retrieves a transaction by ID.
 func (r *Repository) GetTransactionByID(ctx context.Context, id uuid.UUID) (*Transaction, error) {
 	query := `
-		SELECT t.id, t.buyer_id, t.seller_id, t.listing_id, t.request_id, t.offer_id, t.auction_id,
+		SELECT t.id, t.buyer_id, t.seller_id, t.listing_id, t.request_id, t.offer_id, t.auction_id, t.task_id,
 			t.amount, t.currency, t.platform_fee, t.status, t.delivery_confirmed_at, t.completed_at,
 			t.metadata, t.created_at, t.updated_at,
 			COALESCE(b.name, '') as buyer_name, COALESCE(s.name, '') as seller_name
@@ -80,7 +82,7 @@ func (r *Repository) GetTransactionByID(ctx context.Context, id uuid.UUID) (*Tra
 
 	tx := &Transaction{}
 	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&tx.ID, &tx.BuyerID, &tx.SellerID, &tx.ListingID, &tx.RequestID, &tx.OfferID, &tx.AuctionID,
+		&tx.ID, &tx.BuyerID, &tx.SellerID, &tx.ListingID, &tx.RequestID, &tx.OfferID, &tx.AuctionID, &tx.TaskID,
 		&tx.Amount, &tx.Currency, &tx.PlatformFee, &tx.Status, &tx.DeliveryConfirmedAt, &tx.CompletedAt,
 		&tx.Metadata, &tx.CreatedAt, &tx.UpdatedAt,
 		&tx.BuyerName, &tx.SellerName,
@@ -102,21 +104,22 @@ func (r *Repository) ListTransactions(ctx context.Context, params ListTransactio
 	var args []interface{}
 	argNum := 1
 
+	// Role is validated via switch - only known values create conditions
 	if params.AgentID != nil {
 		switch params.Role {
 		case "buyer":
-			conditions = append(conditions, "t.buyer_id = $"+string(rune('0'+argNum)))
+			conditions = append(conditions, fmt.Sprintf("t.buyer_id = $%d", argNum))
 		case "seller":
-			conditions = append(conditions, "t.seller_id = $"+string(rune('0'+argNum)))
+			conditions = append(conditions, fmt.Sprintf("t.seller_id = $%d", argNum))
 		default:
-			conditions = append(conditions, "(t.buyer_id = $"+string(rune('0'+argNum))+" OR t.seller_id = $"+string(rune('0'+argNum))+")")
+			conditions = append(conditions, fmt.Sprintf("(t.buyer_id = $%d OR t.seller_id = $%d)", argNum, argNum))
 		}
 		args = append(args, *params.AgentID)
 		argNum++
 	}
 
 	if params.Status != nil {
-		conditions = append(conditions, "t.status = $"+string(rune('0'+argNum)))
+		conditions = append(conditions, fmt.Sprintf("t.status = $%d", argNum))
 		args = append(args, *params.Status)
 		argNum++
 	}
@@ -137,7 +140,7 @@ func (r *Repository) ListTransactions(ctx context.Context, params ListTransactio
 	}
 
 	// Get items
-	query := `
+	query := fmt.Sprintf(`
 		SELECT t.id, t.buyer_id, t.seller_id, t.listing_id, t.request_id, t.offer_id, t.auction_id,
 			t.amount, t.currency, t.platform_fee, t.status, t.delivery_confirmed_at, t.completed_at,
 			t.metadata, t.created_at, t.updated_at,
@@ -145,9 +148,9 @@ func (r *Repository) ListTransactions(ctx context.Context, params ListTransactio
 		FROM transactions t
 		LEFT JOIN agents b ON t.buyer_id = b.id
 		LEFT JOIN agents s ON t.seller_id = s.id
-		` + whereClause + `
+		%s
 		ORDER BY t.created_at DESC
-		LIMIT $` + string(rune('0'+argNum)) + ` OFFSET $` + string(rune('0'+argNum+1))
+		LIMIT $%d OFFSET $%d`, whereClause, argNum, argNum+1)
 
 	args = append(args, params.Limit, params.Offset)
 

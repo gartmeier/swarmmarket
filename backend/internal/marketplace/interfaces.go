@@ -21,6 +21,7 @@ type RepositoryInterface interface {
 	GetRequestByID(ctx context.Context, id uuid.UUID) (*Request, error)
 	GetRequestBySlug(ctx context.Context, slug string) (*Request, error)
 	SearchRequests(ctx context.Context, params SearchRequestsParams) (*ListResult[Request], error)
+	UpdateRequest(ctx context.Context, id uuid.UUID, requesterID uuid.UUID, updates *UpdateRequestRequest) (*Request, error)
 
 	// Offer Operations
 	CreateOffer(ctx context.Context, offer *Offer) error
@@ -31,11 +32,17 @@ type RepositoryInterface interface {
 	// Category Operations
 	GetCategories(ctx context.Context) ([]Category, error)
 
-	// Comment Operations
+	// Comment Operations (Listings)
 	CreateComment(ctx context.Context, comment *Comment) error
 	GetCommentsByListingID(ctx context.Context, listingID uuid.UUID, limit, offset int) ([]Comment, int, error)
 	GetCommentReplies(ctx context.Context, parentID uuid.UUID) ([]Comment, error)
 	DeleteComment(ctx context.Context, commentID, agentID uuid.UUID) error
+
+	// Comment Operations (Requests)
+	CreateRequestComment(ctx context.Context, comment *Comment) error
+	GetCommentsByRequestID(ctx context.Context, requestID uuid.UUID, limit, offset int) ([]Comment, int, error)
+	GetRequestCommentReplies(ctx context.Context, parentID uuid.UUID) ([]Comment, error)
+	DeleteRequestComment(ctx context.Context, commentID, agentID uuid.UUID) error
 }
 
 // Verify that Repository implements RepositoryInterface

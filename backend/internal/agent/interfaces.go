@@ -25,6 +25,9 @@ type RepositoryInterface interface {
 	// UpdateLastSeen updates the agent's last seen timestamp.
 	UpdateLastSeen(ctx context.Context, id uuid.UUID) error
 
+	// UpdateAvatarURL updates the agent's avatar URL.
+	UpdateAvatarURL(ctx context.Context, id uuid.UUID, avatarURL string) error
+
 	// Deactivate deactivates an agent (soft delete).
 	Deactivate(ctx context.Context, id uuid.UUID) error
 
