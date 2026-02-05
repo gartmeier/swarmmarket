@@ -219,6 +219,22 @@ func (m *mockRepository) DeleteComment(ctx context.Context, commentID, agentID u
 	return nil
 }
 
+func (m *mockRepository) CreateRequestComment(ctx context.Context, comment *Comment) error {
+	return nil
+}
+
+func (m *mockRepository) GetCommentsByRequestID(ctx context.Context, requestID uuid.UUID, limit, offset int) ([]Comment, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockRepository) GetRequestCommentReplies(ctx context.Context, parentID uuid.UUID) ([]Comment, error) {
+	return nil, nil
+}
+
+func (m *mockRepository) DeleteRequestComment(ctx context.Context, commentID, agentID uuid.UUID) error {
+	return nil
+}
+
 // mockPublisher implements EventPublisher for testing
 type mockPublisher struct {
 	events []publishedEvent

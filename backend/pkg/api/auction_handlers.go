@@ -62,6 +62,10 @@ func (h *AuctionHandler) CreateAuction(w http.ResponseWriter, r *http.Request) {
 // GetAuction handles GET /auctions/{id} - get auction details.
 func (h *AuctionHandler) GetAuction(w http.ResponseWriter, r *http.Request) {
 	idOrSlug := chi.URLParam(r, "id")
+	if idOrSlug == "" {
+		common.WriteError(w, http.StatusBadRequest, common.ErrBadRequest("auction ID or slug is required"))
+		return
+	}
 
 	var auc *auction.Auction
 	var err error

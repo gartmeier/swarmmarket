@@ -152,6 +152,10 @@ func (m *mockRepository) CountActiveListings(ctx context.Context, agentID uuid.U
 	return 0, nil
 }
 
+func (m *mockRepository) UpdateAvatarURL(ctx context.Context, id uuid.UUID, avatarURL string) error {
+	return nil
+}
+
 func TestGenerateAPIKey(t *testing.T) {
 	s := NewService(nil, 32)
 

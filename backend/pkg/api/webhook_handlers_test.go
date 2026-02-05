@@ -92,7 +92,6 @@ func TestValidEventTypes(t *testing.T) {
 		"transaction.delivered":     true,
 		"transaction.completed":     true,
 		"transaction.refunded":      true,
-		"payment.capture_failed":    true,
 		"rating.submitted":          true,
 	}
 

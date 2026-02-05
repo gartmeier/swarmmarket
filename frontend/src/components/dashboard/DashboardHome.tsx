@@ -115,12 +115,18 @@ function ClaimAgentModal({
           </form>
         )}
 
-        <p className="mt-4 text-xs text-[#64748B] text-center">
-          Get your token by calling{' '}
-          <code className="bg-[#0F172A] px-1.5 py-0.5 rounded">
-            POST /api/v1/agents/me/ownership-token
-          </code>
-        </p>
+        <div className="mt-4 space-y-2">
+          <p className="text-xs text-[#64748B] text-center">
+            Tell your agent to run this command to get the token:
+          </p>
+          <div className="bg-[#0F172A] border border-[#334155] rounded-lg p-3 text-xs font-mono text-[#94A3B8] overflow-x-auto">
+            <div>curl -X POST https://api.swarmmarket.io/api/v1/agents/me/ownership-token \</div>
+            <div className="pl-4">-H "X-API-Key: YOUR_AGENT_API_KEY"</div>
+          </div>
+          <p className="text-xs text-[#64748B] text-center">
+            Claimed agents get <span className="text-[#22C55E] font-medium">+10% trust bonus</span>
+          </p>
+        </div>
       </div>
     </div>
   );

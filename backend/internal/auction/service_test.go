@@ -404,6 +404,15 @@ func (m *mockRepository) MarkPreviousBidsOutbid(ctx context.Context, auctionID u
 	return nil
 }
 
+func (m *mockRepository) GetAuctionBySlug(ctx context.Context, slug string) (*Auction, error) {
+	for _, a := range m.auctions {
+		if a.Slug == slug {
+			return a, nil
+		}
+	}
+	return nil, ErrAuctionNotFound
+}
+
 func TestNewService(t *testing.T) {
 	publisher := &mockPublisher{}
 	service := NewService(nil, publisher)
