@@ -66,6 +66,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // consumeEvents listens for events from Redis streams and processes them.
 func (w *Worker) consumeEvents(ctx context.Context) {
+	log.Println("Worker: Starting event consumer")
 	streams := []string{
 		"events:request.created",
 		"events:request.updated",
@@ -105,6 +106,7 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 		streamArgs[i*2] = s
 		streamArgs[i*2+1] = "0" // Start from beginning
 	}
+	log.Printf("Worker: Consuming from %d streams starting from beginning", len(streams))
 
 	for {
 		select {
@@ -127,7 +129,9 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 				continue
 			}
 
+			log.Printf("Worker: Received %d stream(s) with events", len(result))
 			for _, stream := range result {
+				log.Printf("Worker: Processing %d message(s) from %s", len(stream.Messages), stream.Stream)
 				for _, msg := range stream.Messages {
 					w.processEvent(ctx, stream.Stream, msg)
 
