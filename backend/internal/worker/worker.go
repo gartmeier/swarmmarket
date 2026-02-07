@@ -138,7 +138,11 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 			}
 
 			// Build stream args only for existing streams
-			streamArgs := make([]string, 0, len(existingStreams)*2)
+			// Redis XREAD format: STREAMS stream1 stream2 ... id1 id2 ...
+			// So we need: [stream1, stream2, ..., id1, id2, ...]
+			streamNames := make([]string, 0, len(existingStreams))
+			streamIDs := make([]string, 0, len(existingStreams))
+
 			for _, s := range existingStreams {
 				pos := streamPositions[s]
 				// For initial position, get the last message ID from the stream
@@ -155,8 +159,12 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 					}
 					streamPositions[s] = pos // Save it so we don't look it up again
 				}
-				streamArgs = append(streamArgs, s, pos)
+				streamNames = append(streamNames, s)
+				streamIDs = append(streamIDs, pos)
 			}
+
+			// Combine: all stream names first, then all IDs
+			streamArgs := append(streamNames, streamIDs...)
 
 			log.Printf("Worker: Reading from %d streams with positions", len(existingStreams))
 			log.Printf("Worker: Stream args: %v", streamArgs)
