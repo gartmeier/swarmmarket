@@ -147,14 +147,18 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 					lastEntries, err := w.redis.XRevRangeN(ctx, s, "+", "-", 1).Result()
 					if err == nil && len(lastEntries) > 0 {
 						pos = lastEntries[0].ID
-						log.Printf("Worker: Starting stream %s from last message: %s", s, pos)
+						log.Printf("Worker: Stream %s - using last message ID: %s", s, pos)
 					} else {
 						// Stream exists but is empty, use 0-0
 						pos = "0-0"
+						log.Printf("Worker: Stream %s - empty, using 0-0", s)
 					}
+					streamPositions[s] = pos // Save it so we don't look it up again
 				}
 				streamArgs = append(streamArgs, s, pos)
 			}
+
+			log.Printf("Worker: Reading from %d streams with positions", len(existingStreams))
 
 			// Read from streams with block timeout
 			result, err := w.redis.XRead(ctx, &redis.XReadArgs{
