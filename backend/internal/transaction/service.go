@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/digi604/swarmmarket/backend/pkg/logger"
 	"github.com/google/uuid"
 )
 
@@ -119,6 +120,16 @@ func (s *Service) CreateTransaction(ctx context.Context, req *CreateTransactionR
 		// Log but don't fail - escrow can be created later
 	}
 
+	// Log transaction creation
+	logger.Info("transaction_created", map[string]interface{}{
+		"transaction_id": tx.ID.String(),
+		"buyer_id":       tx.BuyerID.String(),
+		"seller_id":      tx.SellerID.String(),
+		"amount":         tx.Amount,
+		"currency":       tx.Currency,
+		"status":         string(tx.Status),
+	})
+
 	// Publish event
 	s.publishEvent(ctx, "transaction.created", map[string]any{
 		"transaction_id": tx.ID,
@@ -224,6 +235,16 @@ func (s *Service) ConfirmEscrowFunded(ctx context.Context, transactionID uuid.UU
 		s.repo.UpdateEscrowStatus(ctx, escrow.ID, EscrowFunded)
 	}
 
+	// Log escrow funded
+	logger.Info("escrow_funded", map[string]interface{}{
+		"transaction_id":    transactionID.String(),
+		"buyer_id":          tx.BuyerID.String(),
+		"seller_id":         tx.SellerID.String(),
+		"amount":            tx.Amount,
+		"currency":          tx.Currency,
+		"payment_intent_id": paymentIntentID,
+	})
+
 	// Publish event
 	s.publishEvent(ctx, "transaction.escrow_funded", map[string]any{
 		"transaction_id":    transactionID,
@@ -272,6 +293,14 @@ func (s *Service) MarkDelivered(ctx context.Context, transactionID, agentID uuid
 	// Get updated transaction
 	tx, _ = s.repo.GetTransactionByID(ctx, transactionID)
 
+	// Log delivery marked
+	logger.Info("delivery_marked", map[string]interface{}{
+		"transaction_id": transactionID.String(),
+		"buyer_id":       tx.BuyerID.String(),
+		"seller_id":      tx.SellerID.String(),
+		"status":         string(tx.Status),
+	})
+
 	// Publish event
 	s.publishEvent(ctx, "transaction.delivered", map[string]any{
 		"transaction_id": transactionID,
@@ -310,6 +339,15 @@ func (s *Service) ConfirmDelivery(ctx context.Context, transactionID, agentID uu
 
 	// Get updated transaction
 	tx, _ = s.repo.GetTransactionByID(ctx, transactionID)
+
+	// Log delivery confirmed
+	logger.Info("delivery_confirmed", map[string]interface{}{
+		"transaction_id": transactionID.String(),
+		"buyer_id":       tx.BuyerID.String(),
+		"seller_id":      tx.SellerID.String(),
+		"amount":         tx.Amount,
+		"status":         string(tx.Status),
+	})
 
 	// Publish event
 	s.publishEvent(ctx, "transaction.completed", map[string]any{

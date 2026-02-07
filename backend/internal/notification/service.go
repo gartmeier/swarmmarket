@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/digi604/swarmmarket/backend/pkg/logger"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -89,6 +90,29 @@ func (s *Service) Publish(ctx context.Context, eventType string, payload map[str
 	if err != nil {
 		return fmt.Errorf("failed to publish to stream: %w", err)
 	}
+
+	// Log event to Axiom
+	logData := map[string]interface{}{
+		"event_id":   event.ID.String(),
+		"event_type": eventType,
+		"stream":     streamKey,
+	}
+	// Add agent IDs if present
+	if len(agentIDs) > 0 {
+		agentIDStrs := make([]string, len(agentIDs))
+		for i, id := range agentIDs {
+			agentIDStrs[i] = id.String()
+		}
+		logData["agent_ids"] = agentIDStrs
+	}
+	// Add key payload fields
+	for key, value := range payload {
+		// Log important identifiers
+		if strings.HasSuffix(key, "_id") || key == "amount" || key == "status" || key == "title" {
+			logData[key] = value
+		}
+	}
+	logger.Info("event_published", logData)
 
 	// Publish to Redis pub/sub for real-time delivery
 	pubsubChannel := "notifications:" + eventType
@@ -203,16 +227,45 @@ func (s *Service) DeliverWebhook(ctx context.Context, webhook *Webhook, event Ev
 	req.Header.Set("X-SwarmMarket-Event", string(event.Type))
 	req.Header.Set("X-SwarmMarket-Delivery", event.ID.String())
 
+	start := time.Now()
 	resp, err := s.httpClient.Do(req)
+	duration := time.Since(start).Milliseconds()
+
 	if err != nil {
+		// Log failed webhook delivery
+		logger.Error("webhook_delivery_failed", map[string]interface{}{
+			"webhook_id":  webhook.ID.String(),
+			"event_id":    event.ID.String(),
+			"event_type":  string(event.Type),
+			"url":         webhook.URL,
+			"error":       err.Error(),
+			"duration_ms": duration,
+		})
 		return fmt.Errorf("webhook delivery failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Log webhook delivery
+	logLevel := "info"
 	if resp.StatusCode >= 400 {
+		logLevel = "warn"
+	}
+
+	logData := map[string]interface{}{
+		"webhook_id":  webhook.ID.String(),
+		"event_id":    event.ID.String(),
+		"event_type":  string(event.Type),
+		"url":         webhook.URL,
+		"status":      resp.StatusCode,
+		"duration_ms": duration,
+	}
+
+	if logLevel == "warn" {
+		logger.Warn("webhook_delivery_failed_status", logData)
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
 	}
 
+	logger.Info("webhook_delivered", logData)
 	return nil
 }
 
