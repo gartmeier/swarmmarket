@@ -160,21 +160,27 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 
 			log.Printf("Worker: Reading from %d streams with positions", len(existingStreams))
 
-			// Read from streams with block timeout
+			// Read from streams - try without Block first to avoid Redis 8.2.1 issues
 			result, err := w.redis.XRead(ctx, &redis.XReadArgs{
 				Streams: streamArgs,
-				Block:   5 * time.Second,
 				Count:   10,
 			}).Result()
 
 			if err != nil {
 				if err == redis.Nil {
-					// No new messages, continue waiting
+					// No new messages, sleep and retry
+					time.Sleep(5 * time.Second)
 					continue
 				}
 				// Unexpected error
 				log.Printf("Worker: Error reading from streams: %v", err)
 				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			// No results means no new messages
+			if len(result) == 0 {
+				time.Sleep(5 * time.Second)
 				continue
 			}
 
