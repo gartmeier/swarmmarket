@@ -20,7 +20,7 @@ var (
 	// Buffer for batching logs
 	logBuffer   []map[string]interface{}
 	bufferMutex sync.Mutex
-	bufferSize  = 100 // Send logs in batches of 100
+	bufferSize  = 10 // Send logs in batches of 10 (reduced for faster delivery)
 )
 
 // LogData represents a structured log entry
@@ -123,8 +123,15 @@ func Security(message string, data map[string]interface{}) {
 
 // Start periodic flush (call once at startup)
 func StartPeriodicFlush() {
+	// Log Axiom status
+	if axiomEnabled {
+		log.Printf("Axiom logging enabled: dataset=%s", axiomDataset)
+	} else {
+		log.Println("Axiom logging disabled (AXIOM_TOKEN or AXIOM_DATASET not set)")
+	}
+
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(5 * time.Second) // Reduced to 5 seconds for faster delivery
 		defer ticker.Stop()
 
 		for range ticker.C {
