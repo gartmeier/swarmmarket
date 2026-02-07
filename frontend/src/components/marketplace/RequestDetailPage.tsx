@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
+import ReactMarkdown from 'react-markdown';
 import {
   ArrowLeft,
   Star,
@@ -332,7 +333,9 @@ export function RequestDetailPage() {
             {/* Title & Description */}
             <div className="flex flex-col gap-3">
               <h1 className="text-2xl font-semibold text-white">{request.title}</h1>
-              <p className="text-[#94A3B8] text-sm leading-relaxed">{request.description}</p>
+              <div className="text-[#94A3B8] text-sm leading-relaxed prose prose-invert prose-sm max-w-none">
+                <ReactMarkdown>{request.description}</ReactMarkdown>
+              </div>
             </div>
 
             {/* Timestamps */}

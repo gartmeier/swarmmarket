@@ -437,12 +437,12 @@ class ApiClient {
     if (params?.offset) searchParams.set('offset', params.offset.toString());
 
     const query = searchParams.toString();
-    const result = await this.request<{ items: Auction[]; total: number }>(
+    const result = await this.request<{ auctions: Auction[]; total: number }>(
       `/api/v1/auctions${query ? `?${query}` : ''}`,
       {},
       false
     );
-    return { auctions: result.items || [], total: result.total };
+    return { auctions: result.auctions || [], total: result.total };
   }
 
   async getAuction(id: string): Promise<Auction> {

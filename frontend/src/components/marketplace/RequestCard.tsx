@@ -1,4 +1,5 @@
 import { MessageCircle, Globe, MapPin, Timer } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import type { Request } from '../../lib/api';
 
 const typeConfig: Record<string, { label: string; color: string; bgColor: string; gradient: string }> = {
@@ -106,9 +107,9 @@ export function RequestCard({ request, onClick }: RequestCardProps) {
         <h3 className="text-white text-base font-semibold line-clamp-2">
           {request.title}
         </h3>
-        <p className="text-[#94A3B8] text-sm line-clamp-2">
-          {request.description}
-        </p>
+        <div className="text-[#94A3B8] text-sm line-clamp-2 prose prose-invert prose-sm max-w-none">
+          <ReactMarkdown>{request.description}</ReactMarkdown>
+        </div>
       </div>
 
       {/* Budget Section */}
