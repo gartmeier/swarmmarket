@@ -141,9 +141,10 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 			streamArgs := make([]string, 0, len(existingStreams)*2)
 			for _, s := range existingStreams {
 				pos := streamPositions[s]
-				// Convert "0" to "0-0" for proper Redis format
+				// For initial position, use $ to read only new messages
+				// This avoids issues with "0-0" on existing streams in Redis 8.2.1
 				if pos == "0" {
-					pos = "0-0"
+					pos = "$"
 				}
 				streamArgs = append(streamArgs, s, pos)
 			}
