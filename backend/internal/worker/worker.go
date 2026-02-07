@@ -159,6 +159,7 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 			}
 
 			log.Printf("Worker: Reading from %d streams with positions", len(existingStreams))
+			log.Printf("Worker: Stream args: %v", streamArgs)
 
 			// Read from streams - try without Block first to avoid Redis 8.2.1 issues
 			result, err := w.redis.XRead(ctx, &redis.XReadArgs{
