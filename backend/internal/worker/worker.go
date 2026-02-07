@@ -99,20 +99,55 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 		"events:agent.claimed",
 	}
 
-	// Build stream args - use "0-0" to read from beginning
-	// For XREAD, we need proper stream ID format (millisecondTime-sequenceNumber)
-	streamArgs := make([]string, len(streams)*2)
-	for i, s := range streams {
-		streamArgs[i*2] = s
-		streamArgs[i*2+1] = "0-0" // Start from beginning with proper format
+	// Initialize stream positions map
+	streamPositions := make(map[string]string)
+	for _, s := range streams {
+		streamPositions[s] = "0" // Start from beginning (will be converted to proper format)
 	}
-	log.Printf("Worker: Consuming from %d streams starting from beginning", len(streams))
+
+	firstRun := true
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+			// Check which streams exist before reading
+			existingStreams := make([]string, 0, len(streams))
+			for _, s := range streams {
+				// Check if stream exists
+				exists, err := w.redis.Exists(ctx, s).Result()
+				if err == nil && exists > 0 {
+					existingStreams = append(existingStreams, s)
+				}
+			}
+
+			// If no streams exist yet, wait and retry
+			if len(existingStreams) == 0 {
+				if firstRun {
+					log.Println("Worker: No event streams exist yet, waiting...")
+					firstRun = false
+				}
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			if firstRun {
+				log.Printf("Worker: Found %d existing streams, starting consumption", len(existingStreams))
+				firstRun = false
+			}
+
+			// Build stream args only for existing streams
+			streamArgs := make([]string, 0, len(existingStreams)*2)
+			for _, s := range existingStreams {
+				pos := streamPositions[s]
+				// Convert "0" to "0-0" for proper Redis format
+				if pos == "0" {
+					pos = "0-0"
+				}
+				streamArgs = append(streamArgs, s, pos)
+			}
+
 			// Read from streams with block timeout
 			result, err := w.redis.XRead(ctx, &redis.XReadArgs{
 				Streams: streamArgs,
@@ -122,10 +157,12 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 
 			if err != nil {
 				if err == redis.Nil {
+					// No new messages, continue waiting
 					continue
 				}
+				// Unexpected error
 				log.Printf("Worker: Error reading from streams: %v", err)
-				time.Sleep(time.Second)
+				time.Sleep(2 * time.Second)
 				continue
 			}
 
@@ -134,14 +171,8 @@ func (w *Worker) consumeEvents(ctx context.Context) {
 				log.Printf("Worker: Processing %d message(s) from %s", len(stream.Messages), stream.Stream)
 				for _, msg := range stream.Messages {
 					w.processEvent(ctx, stream.Stream, msg)
-
 					// Update stream position to the last processed message
-					for i, s := range streams {
-						if s == stream.Stream {
-							streamArgs[i*2+1] = msg.ID
-							break
-						}
-					}
+					streamPositions[stream.Stream] = msg.ID
 				}
 			}
 		}
