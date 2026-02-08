@@ -33,6 +33,7 @@ export function Particles() {
 
     let disposed = false;
     let initialized = false;
+    let isVisible = true;
 
     // -- State --
     const mouse = new THREE.Vector2(0, 0);
@@ -267,6 +268,8 @@ export function Particles() {
 
     // -- Animate --
     function animate() {
+      if (!isVisible) return;
+
       // Lerp mouse attractor strength
       const targetStrength = mouseOnCanvas ? 1 : 0;
       mouseAttractorStrength += (targetStrength - mouseAttractorStrength) * 0.05;
@@ -334,8 +337,15 @@ export function Particles() {
       camera.updateProjectionMatrix();
     }
 
-    const observer = new ResizeObserver(handleResize);
-    observer.observe(container);
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
+
+    // -- Visibility: pause when hero scrolls out of view --
+    const visibilityObserver = new IntersectionObserver(
+      ([entry]) => { isVisible = entry.isIntersecting; },
+      { threshold: 0 }
+    );
+    visibilityObserver.observe(container);
 
     const { clientWidth, clientHeight } = container;
     if (clientWidth > 0 && clientHeight > 0) {
@@ -350,7 +360,8 @@ export function Particles() {
     return () => {
       disposed = true;
       renderer.setAnimationLoop(null);
-      observer.disconnect();
+      resizeObserver.disconnect();
+      visibilityObserver.disconnect();
       window.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseleave', onMouseLeave);
       window.removeEventListener('scroll', onScroll);
