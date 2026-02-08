@@ -1,301 +1,373 @@
 import { useEffect, useRef } from 'react';
-
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  baseVx: number;
-  baseVy: number;
-  radius: number;
-  baseRadius: number; // Original radius for scaling
-  color: string;
-  alpha: number;
-  trail: { x: number; y: number; alpha: number }[];
-  waveOffset: number;
-  waveAmplitude: number;
-  connectionRadius: number;
-}
-
-interface GravityPoint {
-  x: number;
-  y: number;
-  strength: number;
-  radius: number;
-}
-
-const COLORS = ['#22D3EE', '#A855F7', '#EC4899', '#22C55E', '#F59E0B'];
-
-// Static gravity points (percentage-based, calculated once)
-const GRAVITY_POINTS_CONFIG = [
-  { xPct: 0.2, yPct: 0.3, strength: 0.3, radius: 150 },
-  { xPct: 0.8, yPct: 0.5, strength: 0.25, radius: 120 },
-  { xPct: 0.5, yPct: 0.7, strength: 0.2, radius: 100 },
-];
+import * as THREE from 'three/webgpu';
+import {
+  Fn,
+  uniform,
+  storage,
+  instanceIndex,
+  float,
+  vec3,
+  vec4,
+  If,
+  Loop,
+  color,
+  smoothstep,
+  mix,
+  cross,
+  mod,
+  normalize,
+  length,
+  sub,
+  mul,
+  add,
+  div,
+  max,
+} from 'three/tsl';
 
 export function Particles() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number | undefined>(undefined);
-  const particlesRef = useRef<Particle[]>([]);
-  const mouseRef = useRef<{ x: number; y: number }>({ x: -1000, y: -1000 });
-  const gravityPointsRef = useRef<GravityPoint[]>([]);
-  const timeRef = useRef<number>(0);
-  const scrollVelocityRef = useRef<number>(0);
-  const lastScrollYRef = useRef<number>(0);
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const centerXRef = useRef<number>(0);
-  const centerYRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let disposed = false;
+    let initialized = false;
 
-    const resizeCanvas = () => {
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
-      centerXRef.current = canvas.width / 2;
-      centerYRef.current = canvas.height / 2;
-    };
+    // -- State --
+    const mouse = new THREE.Vector2(0, 0);
+    let mouseOnCanvas = false;
+    let mouseAttractorStrength = 0;
+    const mouseWorld = new THREE.Vector3(0, 0, 0);
+    let currentScrollY = window.scrollY;
+    let targetCameraAngle = 0;
+    let currentCameraAngle = 0;
 
-    const createParticle = (_: unknown, __?: number): Particle => {
-      const type = Math.random();
-      const baseSpeed = type < 0.15 ? 4 : type < 0.4 ? 3 : type < 0.7 ? 1 : 2;
-      const vx = (Math.random() - 0.5) * baseSpeed;
-      const vy = (Math.random() - 0.5) * baseSpeed;
+    // -- Scene --
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.set(0, 3, 5);
+    camera.lookAt(0, 0, 0);
 
-      // Radius ranges from ~0.5 to ~5
-      const radius = type < 0.15 ? Math.random() * 1.5 + 0.5 : type < 0.4 ? Math.random() * 2.5 + 1.5 : type < 0.7 ? Math.random() * 3 + 2 : Math.random() * 2 + 1;
+    const ambientLight = new THREE.AmbientLight('#ffffff', 0.5);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight('#ffffff', 1.5);
+    directionalLight.position.set(4, 2, 0);
+    scene.add(directionalLight);
 
-      // Bigger particles are brighter: alpha scales with radius (0.1 to 0.7)
-      const alpha = 0.1 + (radius / 5) * 0.6;
+    // -- Renderer --
+    const renderer = new THREE.WebGPURenderer({ antialias: true });
+    renderer.setClearColor(0x0a0f1c, 1);
+    container.appendChild(renderer.domElement);
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
 
-      // Random connection radius for each particle (80-250px)
-      const connectionRadius = Math.random() * 170 + 80;
+    // -- Raycaster for mouse → 3D --
+    const raycaster = new THREE.Raycaster();
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const intersectPoint = new THREE.Vector3();
 
-      return {
-        x: Math.random() * canvas.width,
-        y: Math.random() * canvas.height,
-        vx,
-        vy,
-        baseVx: vx,
-        baseVy: vy,
-        radius,
-        baseRadius: radius,
-        color: COLORS[Math.floor(Math.random() * COLORS.length)],
-        alpha,
-        trail: [],
-        waveOffset: Math.random() * Math.PI * 2,
-        waveAmplitude: Math.random() * 0.5 + 0.3,
-        connectionRadius,
-      };
-    };
+    // -- Particles (40% fewer: ~78K) --
+    const count = 2 ** 17; // 131072
 
-    const initParticles = () => {
-      const particleCount = Math.floor((canvas.width * canvas.height) / 5000);
-      particlesRef.current = Array.from({ length: particleCount }, createParticle);
-    };
+    // Physics uniforms
+    const attractorMassUniform = uniform(1e7);
+    const particleGlobalMassUniform = uniform(1e4);
+    const spinningStrengthUniform = uniform(2.75);
+    const maxSpeedUniform = uniform(8);
+    const velocityDampingUniform = uniform(0.1);
+    const scaleUniform = uniform(0.008);
+    const boundHalfExtentUniform = uniform(14);
+    const colorAUniform = uniform(color('#5900ff'));
+    const colorBUniform = uniform(color('#ffa575'));
 
-    const initGravityPoints = () => {
-      // Static gravity points - only positions update on resize
-      gravityPointsRef.current = GRAVITY_POINTS_CONFIG.map((gp) => ({
-        x: canvas.width * gp.xPct,
-        y: canvas.height * gp.yPct,
-        strength: gp.strength,
-        radius: gp.radius,
-      }));
-    };
+    // Mouse attractor uniform (position + strength)
+    const mousePositionUniform = uniform(new THREE.Vector3(0, 0, 0));
+    const mouseStrengthUniform = uniform(0);
 
-    const drawTrail = (p: Particle) => {
-      for (let i = 0; i < p.trail.length; i++) {
-        const t = p.trail[i];
-        const trailRadius = p.radius * (i / p.trail.length) * 0.8;
-        ctx.beginPath();
-        ctx.arc(t.x, t.y, trailRadius, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = t.alpha * 0.4;
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-    };
+    // Static attractors (positions and rotation axes as vec4 arrays)
+    const staticPositions = [
+      new THREE.Vector4(-3, 0, 0, 0),
+      new THREE.Vector4(3, 0, -1.5, 0),
+      new THREE.Vector4(0, 1, 3, 0),
+    ];
+    const staticRotAxes = [
+      new THREE.Vector4(0, 1, 0, 0),
+      new THREE.Vector4(0, 1, 0, 0),
+      new THREE.Vector4(...new THREE.Vector3(1, 0, -0.5).normalize().toArray(), 0),
+    ];
 
-    const drawParticle = (p: Particle) => {
-      // Draw trail first
-      drawTrail(p);
+    // Storage buffers for positions and velocities
+    const positionArray = new THREE.StorageInstancedBufferAttribute(count, 3);
+    const velocityArray = new THREE.StorageInstancedBufferAttribute(count, 3);
 
-      // Draw glow
-      const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 2);
-      gradient.addColorStop(0, p.color);
-      gradient.addColorStop(1, 'transparent');
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius * 2, 0, Math.PI * 2);
-      ctx.fillStyle = gradient;
-      ctx.globalAlpha = p.alpha * 0.3;
-      ctx.fill();
+    const positionStorage = storage(positionArray, 'vec3', count);
+    const velocityStorage = storage(velocityArray, 'vec3', count);
 
-      // Draw particle
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = p.alpha;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    };
+    // Attractor data as storage buffers
+    const attractorPosData = new Float32Array(3 * 4);
+    const attractorRotData = new Float32Array(3 * 4);
+    for (let i = 0; i < 3; i++) {
+      attractorPosData[i * 4] = staticPositions[i].x;
+      attractorPosData[i * 4 + 1] = staticPositions[i].y;
+      attractorPosData[i * 4 + 2] = staticPositions[i].z;
+      attractorPosData[i * 4 + 3] = 0;
+      attractorRotData[i * 4] = staticRotAxes[i].x;
+      attractorRotData[i * 4 + 1] = staticRotAxes[i].y;
+      attractorRotData[i * 4 + 2] = staticRotAxes[i].z;
+      attractorRotData[i * 4 + 3] = 0;
+    }
+    const attractorPosAttr = new THREE.StorageBufferAttribute(attractorPosData, 4);
+    const attractorRotAttr = new THREE.StorageBufferAttribute(attractorRotData, 4);
+    const attractorPosStorage = storage(attractorPosAttr, 'vec4', 3).toReadOnly();
+    const attractorRotStorage = storage(attractorRotAttr, 'vec4', 3).toReadOnly();
 
-    const drawConnections = () => {
-      const particles = particlesRef.current;
+    // -- Init Compute: randomize positions & velocities --
+    const initFn = Fn(() => {
+      const idx = instanceIndex;
+      const seed = float(idx).mul(0.000007629).add(0.5).fract();
+      const seed2 = float(idx).mul(0.000013).add(0.3).fract();
+      const seed3 = float(idx).mul(0.000019).add(0.7).fract();
+      const seed4 = float(idx).mul(0.000029).add(0.1).fract();
+      const seed5 = float(idx).mul(0.000037).add(0.9).fract();
 
-      for (let i = 0; i < particles.length; i++) {
-        for (let j = i + 1; j < particles.length; j++) {
-          const dx = particles[i].x - particles[j].x;
-          const dy = particles[i].y - particles[j].y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
+      // Spawn particles near the 3 static attractors
+      // Each particle picks one attractor based on its index
+      const attractorIdx = float(idx).mod(3).floor();
+      // Attractor centers: (-3,0,0), (3,0,-1.5), (0,1,3)
+      const ax = attractorIdx.equal(0).select(-3, attractorIdx.equal(1).select(3, 0));
+      const ay = attractorIdx.equal(0).select(0, attractorIdx.equal(1).select(0, 1));
+      const az = attractorIdx.equal(0).select(0, attractorIdx.equal(1).select(-1.5, 3));
 
-          // Use the larger connectionRadius of either particle
-          const maxDist = Math.max(particles[i].connectionRadius, particles[j].connectionRadius);
+      // Spread around attractor with some randomness
+      const px = ax.add(sub(seed, 0.5).mul(4));
+      const py = ay.add(sub(seed2, 0.5).mul(4));
+      const pz = az.add(sub(seed3, 0.5).mul(4));
+      positionStorage.element(idx).assign(vec3(px, py, pz));
 
-          if (distance < maxDist) {
-            const alpha = (1 - distance / maxDist) * 0.25;
-            ctx.beginPath();
-            ctx.moveTo(particles[i].x, particles[i].y);
-            ctx.lineTo(particles[j].x, particles[j].y);
-            ctx.strokeStyle = particles[i].color;
-            ctx.globalAlpha = alpha;
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-          }
+      const phi = seed4.mul(Math.PI * 2);
+      const theta = seed5.mul(2);
+      const sinPhi = phi.sin();
+      const vx = sinPhi.mul(theta.sin()).mul(0.3);
+      const vy = phi.cos().mul(0.3);
+      const vz = sinPhi.mul(theta.cos()).mul(0.3);
+      velocityStorage.element(idx).assign(vec3(vx, vy, vz));
+    });
+
+    const initCompute = initFn().compute(count);
+
+    // -- Update Compute: physics --
+    const updateFn = Fn(() => {
+      const delta = float(1 / 60);
+      const idx = instanceIndex;
+      const position = positionStorage.element(idx).toVar();
+      const velocity = velocityStorage.element(idx).toVar();
+
+      const massSeed = float(idx).mul(0.000007629).add(0.5).fract();
+      const particleMassMultiplier = massSeed.mul(0.75).add(0.25);
+      const particleMass = particleMassMultiplier.mul(particleGlobalMassUniform);
+
+      const G = float(6.67e-11);
+      const force = vec3(0, 0, 0).toVar();
+
+      // Static attractors
+      Loop(3, ({ i }) => {
+        const attractorPos = attractorPosStorage.element(i).xyz;
+        const attractorRot = attractorRotStorage.element(i).xyz;
+
+        const toAttractor = sub(attractorPos, position);
+        const dist = max(length(toAttractor), 0.1);
+        const direction = normalize(toAttractor);
+
+        const gravityStrength = div(
+          mul(attractorMassUniform, mul(particleMass, G)),
+          mul(dist, dist)
+        );
+        const gravityForce = mul(direction, gravityStrength);
+        force.addAssign(gravityForce);
+
+        const spinForce = mul(attractorRot, mul(gravityStrength, spinningStrengthUniform));
+        const spinVelocity = cross(spinForce, toAttractor);
+        force.addAssign(spinVelocity);
+      });
+
+      // Mouse attractor — always compute, scale by strength uniform
+      const toMouse = sub(mousePositionUniform, position);
+      const mouseDist = max(length(toMouse), 0.1);
+      const mouseDir = normalize(toMouse);
+
+      const mouseMass = mul(attractorMassUniform, 1.25); // 5/4 = 1.25x base (was 5x)
+      const mouseGravity = div(
+        mul(mouseMass, mul(particleMass, G)),
+        mul(mouseDist, mouseDist)
+      ).mul(mouseStrengthUniform);
+
+      force.addAssign(mul(mouseDir, mouseGravity));
+
+      const mouseRotAxis = vec3(0, 1, 0);
+      const mouseSpinForce = mul(mouseRotAxis, mul(mouseGravity, spinningStrengthUniform));
+      force.addAssign(cross(mouseSpinForce, toMouse));
+
+      // Velocity update
+      velocity.addAssign(mul(force, delta));
+      const speed = length(velocity);
+      If(speed.greaterThan(maxSpeedUniform), () => {
+        velocity.assign(mul(normalize(velocity), maxSpeedUniform));
+      });
+      velocity.mulAssign(sub(1, velocityDampingUniform));
+
+      // Position update
+      position.addAssign(mul(velocity, delta));
+
+      // Toroidal wrapping
+      const halfExtent = div(boundHalfExtentUniform, 2);
+      position.assign(sub(mod(add(position, halfExtent), boundHalfExtentUniform), halfExtent));
+
+      positionStorage.element(idx).assign(position);
+      velocityStorage.element(idx).assign(velocity);
+    });
+
+    const updateCompute = updateFn().compute(count);
+
+    // -- Material --
+    const material = new THREE.SpriteNodeMaterial({
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    material.positionNode = positionStorage.toAttribute();
+
+    material.colorNode = Fn(() => {
+      const vel = velocityStorage.toAttribute();
+      const speed = length(vel);
+      const colorMix = smoothstep(0, 0.5, div(speed, maxSpeedUniform));
+      const finalColor = mix(colorAUniform, colorBUniform, colorMix);
+      return vec4(finalColor, 1);
+    })();
+
+    material.scaleNode = Fn(() => {
+      const massSeed = float(instanceIndex).mul(0.000007629).add(0.5).fract();
+      return massSeed.mul(0.75).add(0.25).mul(scaleUniform);
+    })();
+
+    // -- Mesh --
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    scene.add(mesh);
+
+    // -- Init --
+    async function init() {
+      await renderer.init();
+      if (disposed) return;
+      initialized = true;
+      renderer.compute(initCompute);
+      renderer.setAnimationLoop(animate);
+    }
+
+    // -- Animate --
+    function animate() {
+      // Lerp mouse attractor strength
+      const targetStrength = mouseOnCanvas ? 1 : 0;
+      mouseAttractorStrength += (targetStrength - mouseAttractorStrength) * 0.05;
+      mouseStrengthUniform.value = mouseAttractorStrength;
+
+      // Update mouse world position via raycasting
+      if (mouseOnCanvas) {
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.ray.intersectPlane(groundPlane, intersectPoint);
+        if (hit) {
+          mouseWorld.lerp(intersectPoint, 0.15);
+          (mousePositionUniform.value as THREE.Vector3).copy(mouseWorld);
         }
       }
-    };
 
-    const updateParticle = (p: Particle) => {
-      const scrollSpeed = Math.abs(scrollVelocityRef.current);
+      // Scroll → zoom in (camera moves closer)
+      const scrollRatio = Math.min(currentScrollY / 800, 1); // 0 to 1 over 800px scroll
+      const targetZoom = scrollRatio;
+      currentCameraAngle += (targetZoom - currentCameraAngle) * 0.15;
+      const zoomFactor = 1 - currentCameraAngle * 0.7; // zooms in up to 70%
+      camera.position.set(0, 3 * zoomFactor, 5 * zoomFactor);
+      camera.lookAt(0, 0, 0);
 
-      if (scrollSpeed > 0.1) {
-        // Update trail
-        p.trail.unshift({ x: p.x, y: p.y, alpha: p.alpha });
-        if (p.trail.length > 10) p.trail.pop();
-        p.trail.forEach((t) => (t.alpha *= 0.8));
+      renderer.compute(updateCompute);
+      renderer.render(scene, camera);
+    }
 
-        // Calculate direction from center to particle (starfield direction)
-        const dx = p.x - centerXRef.current;
-        const dy = p.y - centerYRef.current;
-        const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+    // -- Events: listen on window so hero content overlay doesn't block --
+    function onMouseMove(e: MouseEvent) {
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
 
-        // Normalize direction (avoid division by zero)
-        const dirX = distFromCenter > 0 ? dx / distFromCenter : 0;
-        const dirY = distFromCenter > 0 ? dy / distFromCenter : 0;
-
-        // Bigger stars move faster (radius affects speed)
-        const baseSpeed = 0.5 + (p.radius / 5) * 3;
-        const speed = baseSpeed * (scrollSpeed / 2);
-
-        // Scroll down = outward, scroll up = inward
-        const direction = scrollVelocityRef.current > 0 ? 1 : -1;
-
-        // Apply starfield movement
-        p.x += dirX * speed * direction;
-        p.y += dirY * speed * direction;
-
-        // When going off screen, wrap to opposite side
-        const margin = 50;
-        if (p.x < -margin) p.x = canvas.width + margin;
-        if (p.x > canvas.width + margin) p.x = -margin;
-        if (p.y < -margin) p.y = canvas.height + margin;
-        if (p.y > canvas.height + margin) p.y = -margin;
-
-        // Scale radius based on distance from center (35% at center, 100% at edges)
-        const maxDist = Math.max(canvas.width, canvas.height) * 0.5;
-        const distRatio = Math.min(distFromCenter / maxDist, 1);
-        p.radius = p.baseRadius * (0.35 + distRatio * 0.65);
-
-        // When scrolling up and star gets close to center, move to edge
-        if (direction < 0 && distFromCenter < 20) {
-          const angle = Math.random() * Math.PI * 2;
-          const edgeDist = Math.max(canvas.width, canvas.height) * 0.6;
-          p.x = centerXRef.current + Math.cos(angle) * edgeDist;
-          p.y = centerYRef.current + Math.sin(angle) * edgeDist;
-          p.trail = [];
-        }
+      // Check if mouse is within the container bounds
+      if (x >= 0 && x <= rect.width && y >= 0 && y <= rect.height) {
+        mouse.x = (x / rect.width) * 2 - 1;
+        mouse.y = -(y / rect.height) * 2 + 1;
+        mouseOnCanvas = true;
       } else {
-        // Fade out trails when not scrolling
-        p.trail.forEach((t) => (t.alpha *= 0.9));
-        if (p.trail.length > 0 && p.trail[p.trail.length - 1].alpha < 0.01) {
-          p.trail.pop();
-        }
+        mouseOnCanvas = false;
       }
-    };
+    }
 
-    const animate = () => {
-      timeRef.current++;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    function onMouseLeave() {
+      mouseOnCanvas = false;
+    }
 
-      // Gentle ease-out over ~0.7s (0.96^42 ≈ 0.18, feels more linear)
-      scrollVelocityRef.current *= 0.96;
+    function onScroll() {
+      currentScrollY = window.scrollY;
+    }
 
-      particlesRef.current.forEach(updateParticle);
-      drawConnections();
-      particlesRef.current.forEach(drawParticle);
+    window.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseleave', onMouseLeave);
+    window.addEventListener('scroll', onScroll, { passive: true });
 
-      animationRef.current = requestAnimationFrame(animate);
-    };
+    // -- Resize --
+    function handleResize(entries: ResizeObserverEntry[]) {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width === 0 || height === 0) return;
+      renderer.setSize(width, height, false);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    }
 
-    const handleScroll = () => {
-      const currentScrollY = window.scrollY;
-      const delta = currentScrollY - lastScrollYRef.current;
-      // Add momentum - blend new scroll with existing velocity for smoother feel
-      scrollVelocityRef.current = scrollVelocityRef.current * 0.5 + delta * 0.5;
-      lastScrollYRef.current = currentScrollY;
-    };
+    const observer = new ResizeObserver(handleResize);
+    observer.observe(container);
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseRef.current.x = e.clientX - rect.left;
-      mouseRef.current.y = e.clientY - rect.top;
-    };
+    const { clientWidth, clientHeight } = container;
+    if (clientWidth > 0 && clientHeight > 0) {
+      renderer.setSize(clientWidth, clientHeight, false);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      camera.aspect = clientWidth / clientHeight;
+      camera.updateProjectionMatrix();
+    }
 
-    const handleMouseLeave = () => {
-      mouseRef.current.x = -1000;
-      mouseRef.current.y = -1000;
-    };
-
-    resizeCanvas();
-    initParticles();
-    initGravityPoints();
-    lastScrollYRef.current = window.scrollY;
-    animate();
-
-    const handleResize = () => {
-      resizeCanvas();
-      initParticles();
-      initGravityPoints();
-    };
-
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseleave', handleMouseLeave);
+    init();
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('scroll', handleScroll);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseleave', handleMouseLeave);
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      disposed = true;
+      renderer.setAnimationLoop(null);
+      observer.disconnect();
+      window.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseleave', onMouseLeave);
+      window.removeEventListener('scroll', onScroll);
+      if (initialized) {
+        renderer.dispose();
+        geometry.dispose();
+        material.dispose();
       }
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
+      if (renderer.domElement.parentNode) {
+        renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
     };
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
+    <div
+      ref={containerRef}
       className="absolute inset-0 w-full h-full"
       style={{ opacity: 0.85 }}
     />

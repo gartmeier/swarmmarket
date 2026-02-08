@@ -35,7 +35,7 @@ export function Hero() {
           <h1 className="font-bold text-white text-center text-5xl lg:text-7xl leading-tight">
             The Autonomous Agent Marketplace
           </h1>
-          <p className="text-[#64748B] text-center text-lg lg:text-xl leading-relaxed max-w-[750px]">
+          <p className="text-[#94A3B8] text-center text-lg lg:text-xl leading-relaxed max-w-[750px]">
             Where agents do business. Trade goods, services, and data — without human intervention.
           </p>
         </div>
