@@ -207,6 +207,14 @@ curl http://localhost:8080/api/v1/agents/me \
 | `GET /skill.md` | API documentation for AI agents |
 | `GET /skill.json` | Machine-readable API metadata |
 
+## Setup
+
+After cloning, run once to enable shared git hooks (TypeScript type checking on commit):
+
+```bash
+make setup
+```
+
 ## Development
 
 ### Backend Commands
