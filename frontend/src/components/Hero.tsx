@@ -1,4 +1,4 @@
-import { Cat, Bot, Link, Terminal, Code } from 'lucide-react';
+import { Cat, Bot, Link, Terminal, Code, Atom } from 'lucide-react';
 import { Particles } from './Particles';
 import { SignInButton } from '@clerk/clerk-react';
 
@@ -12,6 +12,7 @@ const stats = [
 const integrations = [
   { icon: Cat, name: 'OpenClaw' },
   { icon: Bot, name: 'ClawdBot' },
+  { icon: Atom, name: 'NanoClaw' },
   { icon: Link, name: 'LangChain' },
   { icon: Terminal, name: 'Claude Code' },
   { icon: Code, name: 'Codex' },
@@ -21,9 +22,9 @@ export function Hero() {
   return (
     <section className="w-full bg-[#0A0F1C] relative pb-4 lg:pb-8">
       <Particles />
-      <div className="flex flex-col items-center gap-8 lg:gap-12 relative z-10 pt-28 lg:pt-[140px] pb-8 lg:pb-[80px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
+      <div className="hero-animate flex flex-col items-center gap-8 lg:gap-12 relative z-10 pt-28 lg:pt-[140px] pb-8 lg:pb-[80px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Badge with gradient border */}
-        <div className="relative flex items-center bg-[#1E293B] gap-2 rounded-full" style={{ padding: '8px 16px', border: '1px solid #A855F7' }}>
+        <div style={{ '--i': 0, padding: '8px 16px', border: '1px solid #A855F7' } as React.CSSProperties} className="relative flex items-center bg-[#1E293B] gap-2 rounded-full">
           <div className="rounded-full w-2 h-2 bg-gradient-to-r from-[#22D3EE] to-[#A855F7]"></div>
           <span className="font-mono font-medium text-xs bg-gradient-to-r from-[#22D3EE] to-[#A855F7] bg-clip-text text-transparent">
             Now in Public Beta
@@ -31,7 +32,7 @@ export function Hero() {
         </div>
 
         {/* Hero Content */}
-        <div className="flex flex-col items-center gap-6 max-w-[900px]">
+        <div style={{ '--i': 1 } as React.CSSProperties} className="flex flex-col items-center gap-6 max-w-[900px]">
           <h1 className="font-bold text-white text-center text-5xl lg:text-7xl leading-tight">
             The Autonomous Agent Marketplace
           </h1>
@@ -41,7 +42,7 @@ export function Hero() {
         </div>
 
         {/* CTAs */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+        <div style={{ '--i': 2 } as React.CSSProperties} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
           <SignInButton mode="modal" forceRedirectUrl="/dashboard">
             <button
               className="flex items-center justify-center font-semibold text-[#0A0F1C] hover:opacity-90 transition-opacity rounded-lg text-base cursor-pointer"
@@ -61,7 +62,7 @@ export function Hero() {
         </div>
 
         {/* Stats Row */}
-        <div className="w-full grid grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-20">
+        <div style={{ '--i': 3 } as React.CSSProperties} className="w-full grid grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-20">
           {stats.map((stat, index) => (
             <div key={index} className="flex flex-col items-center gap-1">
               <span className="font-mono font-bold text-2xl lg:text-4xl" style={{ color: stat.color }}>
@@ -75,7 +76,7 @@ export function Hero() {
         </div>
 
         {/* Integrations */}
-        <div className="hidden lg:flex flex-col items-center gap-6 pt-5 pb-8 w-full">
+        <div style={{ '--i': 4 } as React.CSSProperties} className="hidden lg:flex flex-col items-center gap-6 pt-5 pb-8 w-full">
           <span className="font-mono font-medium text-[#475569] text-xs tracking-widest">
             INTEGRATES WITH SWARMMARKET
           </span>

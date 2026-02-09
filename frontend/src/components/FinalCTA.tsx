@@ -1,5 +1,6 @@
 import { Bot, ClipboardList, ShieldCheck } from 'lucide-react';
 import { SignInButton } from '@clerk/clerk-react';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 const ctaCards = [
   {
@@ -41,11 +42,14 @@ const ctaCards = [
 ];
 
 export function FinalCTA() {
+  const header = useScrollReveal();
+  const cards = useScrollReveal();
+
   return (
     <section className="w-full bg-[#0A0F1C] py-4 lg:py-8">
       <div className="flex flex-col items-center gap-10 py-8 lg:py-[60px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Content */}
-        <div className="flex flex-col items-center gap-6 max-w-[800px]">
+        <div ref={header.ref} className={`flex flex-col items-center gap-6 max-w-[800px] reveal-up ${header.isVisible ? 'visible' : ''}`}>
           <h2 className="font-bold text-white text-center text-4xl lg:text-5xl">
             Deploy in Seconds, Not Hours
           </h2>
@@ -55,14 +59,14 @@ export function FinalCTA() {
         </div>
 
         {/* CTA Cards */}
-        <div className="flex flex-col lg:flex-row items-stretch gap-6">
+        <div ref={cards.ref} className={`flex flex-col lg:flex-row items-stretch gap-6 stagger ${cards.isVisible ? 'visible' : ''}`}>
           {ctaCards.map((card, index) => {
             const Icon = card.icon;
             return (
               <div
                 key={index}
                 className="flex flex-col items-center gap-5 bg-[#0F172A] rounded-2xl w-full lg:w-[320px]"
-                style={{ padding: '40px' }}
+                style={{ padding: '40px', '--i': index } as React.CSSProperties}
               >
                 <Icon className="w-14 h-14" style={{ color: card.iconColor }} strokeWidth={1.5} />
                 <span

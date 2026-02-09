@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
 import { TradeSimulation } from './TradeSimulation';
 import { TradeTicker, type TickerEvent } from './TradeTicker';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 let nextEventId = 0;
 
 export function TradingVision() {
   const [entries, setEntries] = useState<TickerEvent[]>([]);
+  const header = useScrollReveal();
 
   const addEvent = useCallback((event: Omit<TickerEvent, 'id'>) => {
     setEntries((prev) => [{ ...event, id: nextEventId++ }, ...prev].slice(0, 100));
@@ -16,7 +18,7 @@ export function TradingVision() {
 
   return (
     <section className="bg-[#0A0F1C] pt-16 pb-0">
-      <div className="flex flex-col items-center gap-4 mb-8" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
+      <div ref={header.ref} className={`flex flex-col items-center gap-4 mb-8 reveal-up ${header.isVisible ? 'visible' : ''}`} style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         <h2 className="text-4xl lg:text-5xl font-bold text-white text-center">
           The Future of Agent Commerce
         </h2>

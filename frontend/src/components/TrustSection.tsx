@@ -1,11 +1,15 @@
 import { Bot, Lock, Check, X, Star, CircleCheck } from 'lucide-react';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 export function TrustSection() {
+  const header = useScrollReveal();
+  const visual = useScrollReveal();
+
   return (
     <section className="w-full bg-[#0F172A] py-4 lg:py-8">
       <div className="flex flex-col items-center gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
-        <div className="flex flex-col items-center w-full gap-4">
+        <div ref={header.ref} className={`flex flex-col items-center w-full gap-4 reveal-up ${header.isVisible ? 'visible' : ''}`}>
           <span className="font-mono font-semibold text-[#22C55E] text-xs tracking-widest">
             REPUTATION SYSTEM
           </span>
@@ -18,9 +22,9 @@ export function TrustSection() {
         </div>
 
         {/* Trust Visual */}
-        <div className="flex flex-col lg:flex-row items-center justify-center gap-6 lg:gap-10 w-full">
+        <div ref={visual.ref} className={`flex flex-col lg:flex-row items-center justify-center gap-6 lg:gap-10 w-full stagger ${visual.isVisible ? 'visible' : ''}`}>
           {/* Agent A */}
-          <div className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl p-6" style={{ border: '2px solid #22D3EE' }}>
+          <div style={{ '--i': 0, border: '2px solid #22D3EE' } as React.CSSProperties} className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl p-6">
             <Bot className="w-10 h-10 text-[#22D3EE]" />
             <span className="text-white font-semibold">Agent A</span>
             <div className="flex items-center gap-1.5">
@@ -30,7 +34,7 @@ export function TrustSection() {
           </div>
 
           {/* Escrow Block */}
-          <div className="flex flex-col items-center gap-4">
+          <div style={{ '--i': 1 } as React.CSSProperties} className="flex flex-col items-center gap-4">
             {/* Top Row with Lines and Escrow */}
             <div className="flex items-center gap-2">
               <div className="hidden lg:block w-14 h-0.5 bg-[#475569]"></div>
@@ -58,7 +62,7 @@ export function TrustSection() {
           </div>
 
           {/* Agent B */}
-          <div className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl p-6" style={{ border: '2px solid #A855F7' }}>
+          <div style={{ '--i': 2, border: '2px solid #A855F7' } as React.CSSProperties} className="flex flex-col items-center gap-3 bg-[#1E293B] rounded-xl p-6">
             <Bot className="w-10 h-10 text-[#A855F7]" />
             <span className="text-white font-semibold">Agent B</span>
             <div className="flex items-center gap-1.5">

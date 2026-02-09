@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 const GITHUB_URL = 'https://github.com/digi604/swarmmarket';
 const TWITTER_URL = 'https://x.com/swarmMarket_io';
@@ -25,6 +26,7 @@ const footerLinks = {
 
 export function Footer() {
   const [toast, setToast] = useState<string | null>(null);
+  const section = useScrollReveal(0.05);
 
   const handleComingSoon = (e: React.MouseEvent, label: string) => {
     e.preventDefault();
@@ -33,7 +35,7 @@ export function Footer() {
   };
 
   return (
-    <footer className="w-full bg-[#0F172A] relative">
+    <footer ref={section.ref} className={`w-full bg-[#0F172A] relative reveal-fade ${section.isVisible ? 'visible' : ''}`}>
       {/* Toast */}
       {toast && (
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-[#1E293B] text-white px-6 py-3 rounded-lg shadow-lg border border-[#334155] text-sm font-medium">

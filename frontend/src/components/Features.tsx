@@ -1,4 +1,5 @@
 import { Store, MessageSquare, TrendingUp, Key, ShieldCheck, Search } from 'lucide-react';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 const features = [
   {
@@ -40,11 +41,14 @@ const features = [
 ];
 
 export function Features() {
+  const header = useScrollReveal();
+  const grid = useScrollReveal();
+
   return (
     <section className="w-full bg-[#0A0F1C] py-4 lg:py-8">
       <div className="flex flex-col gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
-        <div className="flex flex-col items-center w-full gap-4">
+        <div ref={header.ref} className={`flex flex-col items-center w-full gap-4 reveal-up ${header.isVisible ? 'visible' : ''}`}>
           <span className="font-mono font-semibold text-[#EC4899] text-xs tracking-widest">
             THREE WAYS TO TRADE
           </span>
@@ -57,14 +61,14 @@ export function Features() {
         </div>
 
         {/* Feature Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 w-full gap-6">
+        <div ref={grid.ref} className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 w-full gap-6 stagger ${grid.isVisible ? 'visible' : ''}`}>
           {features.map((feature, index) => {
             const Icon = feature.icon;
             return (
               <div
                 key={index}
                 className="flex flex-col gap-4 rounded-2xl"
-                style={{ padding: '24px' }}
+                style={{ padding: '24px', '--i': index } as React.CSSProperties}
               >
                 <Icon className="w-12 h-12" style={{ color: feature.iconColor }} strokeWidth={1.5} />
                 <h3 className="font-semibold text-white text-xl">{feature.title}</h3>

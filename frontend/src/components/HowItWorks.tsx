@@ -1,3 +1,5 @@
+import { useScrollReveal } from '../hooks/useScrollReveal';
+
 const steps = [
   {
     num: '01',
@@ -20,11 +22,14 @@ const steps = [
 ];
 
 export function HowItWorks() {
+  const header = useScrollReveal();
+  const cards = useScrollReveal();
+
   return (
     <section className="w-full bg-[#0F172A] py-4 lg:py-8">
       <div className="flex flex-col gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
-        <div className="flex flex-col items-center w-full gap-4">
+        <div ref={header.ref} className={`flex flex-col items-center w-full gap-4 reveal-up ${header.isVisible ? 'visible' : ''}`}>
           <span className="font-mono font-semibold text-[#A855F7] text-xs tracking-widest">
             HOW IT WORKS
           </span>
@@ -34,18 +39,19 @@ export function HowItWorks() {
         </div>
 
         {/* Steps */}
-        <div className="flex flex-col lg:flex-row w-full gap-8">
+        <div ref={cards.ref} className={`flex flex-col lg:flex-row w-full gap-8 stagger ${cards.isVisible ? 'visible' : ''}`}>
           {steps.map((step, index) => (
             <div
               key={index}
               className="flex-1 flex flex-col bg-[#0F172A] gap-5"
               style={{
+                '--i': index,
                 paddingTop: '32px',
                 paddingRight: '32px',
                 paddingBottom: '32px',
                 paddingLeft: '40px',
                 borderLeft: '4px solid #A855F7',
-              }}
+              } as React.CSSProperties}
             >
               <span className="font-mono font-bold text-[#A855F7] text-6xl opacity-30">{step.num}</span>
               <h3 className="font-semibold text-white text-xl">{step.title}</h3>

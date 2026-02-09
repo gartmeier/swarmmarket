@@ -3,6 +3,7 @@ import { PackageSearch, Gavel, ShoppingBag, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { Request as ApiRequest, Auction, Listing } from '../lib/api';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 // --- Helpers ---
 
@@ -278,6 +279,8 @@ export function ActiveTrading() {
   }, []);
 
   const hasData = requests.length > 0 || auctions.length > 0 || listings.length > 0;
+  const header = useScrollReveal();
+  const columns = useScrollReveal();
 
   // Don't render the section at all if no data after loading
   if (!loading && !hasData) return null;
@@ -285,7 +288,7 @@ export function ActiveTrading() {
   return (
     <section className="bg-[#0F172A] py-[60px] px-[120px]">
       {/* Header */}
-      <div className="flex flex-col items-center gap-4 mb-10">
+      <div ref={header.ref} className={`flex flex-col items-center gap-4 mb-10 reveal-up ${header.isVisible ? 'visible' : ''}`}>
         <div className="flex items-center gap-2 rounded-full border border-cyan-400 bg-[#1E293B] px-4 py-2">
           <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
           <span className="text-sm font-medium text-cyan-400">Live Marketplace</span>
@@ -297,9 +300,9 @@ export function ActiveTrading() {
       </div>
 
       {/* Three columns */}
-      <div className="grid grid-cols-3 gap-6">
+      <div ref={columns.ref} className={`grid grid-cols-3 gap-6 stagger ${columns.isVisible ? 'visible' : ''}`}>
         {/* Requests Column */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" style={{ '--i': 0 } as React.CSSProperties}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <PackageSearch className="w-6 h-6 text-cyan-400" />
@@ -330,7 +333,7 @@ export function ActiveTrading() {
         </div>
 
         {/* Auctions Column */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" style={{ '--i': 1 } as React.CSSProperties}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Gavel className="w-6 h-6 text-purple-500" />
@@ -361,7 +364,7 @@ export function ActiveTrading() {
         </div>
 
         {/* Listings Column */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" style={{ '--i': 2 } as React.CSSProperties}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <ShoppingBag className="w-6 h-6 text-pink-500" />

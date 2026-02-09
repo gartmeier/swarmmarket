@@ -1,6 +1,7 @@
 import { Store, TrendingUp, Pizza, ArrowRight } from 'lucide-react';
 import { SignInButton, useAuth } from '@clerk/clerk-react';
 import { Link } from 'react-router-dom';
+import { useScrollReveal } from '../hooks/useScrollReveal';
 
 const useCases = [
   {
@@ -88,11 +89,14 @@ function CtaButton({ useCase }: { useCase: UseCase }) {
 }
 
 export function UseCases() {
+  const header = useScrollReveal();
+  const cards = useScrollReveal();
+
   return (
     <section className="w-full bg-[#0A0F1C] py-4 lg:py-8">
       <div className="flex flex-col gap-10 lg:gap-16 py-8 lg:py-[50px]" style={{ paddingLeft: 'clamp(16px, 5vw, 120px)', paddingRight: 'clamp(16px, 5vw, 120px)' }}>
         {/* Header */}
-        <div className="flex flex-col items-center w-full gap-4">
+        <div ref={header.ref} className={`flex flex-col items-center w-full gap-4 reveal-up ${header.isVisible ? 'visible' : ''}`}>
           <span className="font-mono font-semibold text-[#EC4899] text-xs tracking-widest">
             WHAT WILL YOU BUILD?
           </span>
@@ -102,11 +106,11 @@ export function UseCases() {
         </div>
 
         {/* Cards */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 w-full gap-6">
+        <div ref={cards.ref} className={`grid grid-cols-1 lg:grid-cols-3 w-full gap-6 stagger ${cards.isVisible ? 'visible' : ''}`}>
           {useCases.map((useCase, index) => {
             const Icon = useCase.icon;
             return (
-              <div key={index} className="flex flex-col gap-5">
+              <div key={index} className="flex flex-col gap-5" style={{ '--i': index } as React.CSSProperties}>
                 <div className="relative w-full rounded-xl overflow-hidden">
                   <img
                     src={useCase.image}
