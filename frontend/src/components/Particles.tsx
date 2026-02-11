@@ -366,9 +366,11 @@ export function Particles() {
       document.removeEventListener('mouseleave', onMouseLeave);
       window.removeEventListener('scroll', onScroll);
       if (initialized) {
-        renderer.dispose();
-        geometry.dispose();
-        material.dispose();
+        try {
+          geometry.dispose();
+          material.dispose();
+          renderer.dispose();
+        } catch { /* renderer node tracking may already be torn down */ }
       }
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
