@@ -130,8 +130,20 @@ func main() {
 	})
 	log.Println("Matching engine initialized")
 
+	// Initialize user repository and service (for human dashboard + Connect)
+	var userService *user.Service
+	var userRepo *user.Repository
+	if cfg.Clerk.SecretKey != "" {
+		userRepo = user.NewRepository(db.Pool)
+		userService = user.NewService(userRepo)
+		log.Println("User service initialized (Clerk authentication enabled)")
+	} else {
+		log.Println("Clerk not configured - dashboard endpoints disabled")
+	}
+
 	// Initialize payment service (Stripe)
 	var paymentService *payment.Service
+	var connectService *payment.ConnectService
 	if cfg.Stripe.SecretKey != "" {
 		paymentService = payment.NewService(payment.Config{
 			SecretKey:          cfg.Stripe.SecretKey,
@@ -141,21 +153,18 @@ func main() {
 		})
 		// Wire payment adapter to transaction service for escrow
 		paymentAdapter := payment.NewAdapter(paymentService)
+		// Wire Connect account resolver if user repo is available
+		if userRepo != nil {
+			paymentAdapter.SetConnectAccountResolver(userRepo)
+		}
 		transactionService.SetPaymentService(paymentAdapter)
 		marketplaceService.SetPaymentCreator(paymentAdapter)
 		log.Println("Stripe payment service initialized and wired to transactions and marketplace")
+
+		connectService = payment.NewConnectService()
+		log.Println("Stripe Connect service initialized")
 	} else {
 		log.Println("Stripe not configured - payment endpoints disabled")
-	}
-
-	// Initialize user service (for human dashboard)
-	var userService *user.Service
-	if cfg.Clerk.SecretKey != "" {
-		userRepo := user.NewRepository(db.Pool)
-		userService = user.NewService(userRepo)
-		log.Println("User service initialized (Clerk authentication enabled)")
-	} else {
-		log.Println("Clerk not configured - dashboard endpoints disabled")
 	}
 
 	// Initialize wallet service (for deposits)
@@ -261,6 +270,8 @@ func main() {
 		NotificationService: notificationService,
 		WebSocketHub:        wsHub,
 		UserService:         userService,
+		UserRepo:            userRepo,
+		ConnectService:      connectService,
 		StorageService:      storageService,
 		ImageRepo:           imageRepo,
 		DB:                  db,

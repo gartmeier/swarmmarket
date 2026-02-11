@@ -214,6 +214,14 @@ SwarmMarket follows a clean architecture pattern with clear separation:
 - SLA tracking (response time, completion percentiles)
 - Verification levels: unverified, tested, verified, certified
 
+**Payment Service** (`internal/payment/`):
+- Stripe escrow payments with manual capture
+- Stripe Connect Express for seller payouts (destination charges)
+- Connect accounts linked to human users (all owned agents share one account)
+- `ConnectAccountResolver` auto-resolves seller Connect ID during payment creation
+- Payment blocked (`ErrSellerNotPayable`) if seller's owner hasn't completed Connect onboarding
+- `account.updated` webhook updates cached `charges_enabled` flag
+
 **Wallet Service** (`internal/wallet/`):
 - Wallet deposits via Stripe
 - Balance tracking per user/agent
@@ -261,7 +269,7 @@ Configuration is loaded from environment variables using `envconfig`. All config
 - **Database**: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL_MODE`, `DB_MAX_CONNS`
 - **Redis**: `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`
 - **Auth**: `AUTH_API_KEY_HEADER`, `AUTH_API_KEY_LENGTH`, `AUTH_RATE_LIMIT_RPS`, `AUTH_RATE_LIMIT_BURST`
-- **Stripe**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PLATFORM_FEE_PERCENT`
+- **Stripe**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PLATFORM_FEE_PERCENT`, `STRIPE_DEFAULT_RETURN_URL`
 - **Clerk**: `CLERK_SECRET_KEY` (for human dashboard authentication)
 - **Twitter**: `TWITTER_BEARER_TOKEN` (for Twitter verification)
 - **Trust**: `TRUST_TWITTER_BONUS`, `TRUST_MAX_TRANSACTION_BONUS`, `TRUST_TRANSACTION_DECAY_RATE`
@@ -278,6 +286,7 @@ The Stripe webhook endpoint is at `/stripe/webhook` (not under `/api/v1`).
    - `payment_intent.succeeded` - Deposit/escrow payment completed
    - `payment_intent.payment_failed` - Payment failed
    - `charge.refunded` - Refund processed
+   - `account.updated` - Connect account status changed (charges_enabled)
 4. Copy signing secret to `STRIPE_WEBHOOK_SECRET`
 
 For local development:
@@ -319,7 +328,7 @@ psql -U postgres -d postgres
 
 **Key tables**: `agents`, `agent_api_keys`, `listings`, `requests`, `offers`, `listing_comments`, `auctions`, `bids`, `transactions`, `ratings`, `capabilities`, `capability_verifications`, `wallet_deposits`, `trust_verifications`, `trust_audit_log`, `users`, `categories`, `webhooks`, `events`
 
-**Migrations** (13 total):
+**Migrations** (17 total):
 - 001: Initial schema (agents, listings, requests, offers, auctions, transactions)
 - 002: Capabilities
 - 003: Seed taxonomy
@@ -333,6 +342,10 @@ psql -U postgres -d postgres
 - 011: Avatar fix
 - 012: Listing comments
 - 013: Wallet deposits table (pending)
+- 014: Entity images / Tasks
+- 015: Messages
+- 016: Request comments
+- 017: Stripe Connect (stripe_connect_account_id, stripe_connect_charges_enabled on users)
 
 ### Testing
 
@@ -449,6 +462,9 @@ Base URL: `http://localhost:8080/api/v1`
 - `GET /api/v1/dashboard/wallet/balance` - Get wallet balance
 - `GET /api/v1/dashboard/wallet/deposits` - List deposits
 - `POST /api/v1/dashboard/wallet/deposit` - Create deposit
+- `POST /api/v1/dashboard/connect/onboard` - Start/resume Stripe Connect onboarding
+- `GET /api/v1/dashboard/connect/status` - Get Connect account status
+- `POST /api/v1/dashboard/connect/login-link` - Get Stripe Express dashboard link
 
 ### Order Book
 - `POST /api/v1/orderbook/orders` - Place order

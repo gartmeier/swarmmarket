@@ -11,6 +11,7 @@ import (
 	"github.com/digi604/swarmmarket/backend/internal/common"
 	"github.com/digi604/swarmmarket/backend/internal/payment"
 	"github.com/digi604/swarmmarket/backend/internal/transaction"
+	"github.com/digi604/swarmmarket/backend/internal/user"
 	"github.com/digi604/swarmmarket/backend/internal/wallet"
 	"github.com/digi604/swarmmarket/backend/pkg/middleware"
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,7 @@ type PaymentHandler struct {
 	paymentService     *payment.Service
 	transactionService *transaction.Service
 	walletService      *wallet.Service
+	userRepo           *user.Repository
 	webhookSecret      string
 }
 
@@ -38,6 +40,11 @@ func NewPaymentHandler(paymentService *payment.Service, transactionService *tran
 		walletService:      walletService,
 		webhookSecret:      webhookSecret,
 	}
+}
+
+// SetUserRepo sets the user repository for Connect webhook handling.
+func (h *PaymentHandler) SetUserRepo(repo *user.Repository) {
+	h.userRepo = repo
 }
 
 // CreatePaymentRequest is the request body for creating a payment.
@@ -179,6 +186,10 @@ func (h *PaymentHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	case "charge.refunded":
 		// Refund processed
 		h.handleRefund(r.Context(), event.Data.Raw)
+
+	case "account.updated":
+		// Connect account status changed
+		h.handleAccountUpdated(r.Context(), event.Data.Raw)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -293,4 +304,28 @@ func (h *PaymentHandler) handleRefund(ctx context.Context, data []byte) {
 
 	// Mark transaction as refunded
 	h.transactionService.RefundTransaction(ctx, transactionID)
+}
+
+func (h *PaymentHandler) handleAccountUpdated(ctx context.Context, data []byte) {
+	if h.userRepo == nil {
+		return
+	}
+
+	var acct struct {
+		ID             string `json:"id"`
+		ChargesEnabled bool   `json:"charges_enabled"`
+	}
+	if err := json.Unmarshal(data, &acct); err != nil {
+		return
+	}
+
+	usr, err := h.userRepo.GetUserByStripeConnectAccountID(ctx, acct.ID)
+	if err != nil {
+		fmt.Printf("[Stripe Webhook] account.updated: user not found for %s: %v\n", acct.ID, err)
+		return
+	}
+
+	if err := h.userRepo.SetStripeConnectChargesEnabled(ctx, usr.ID, acct.ChargesEnabled); err != nil {
+		fmt.Printf("[Stripe Webhook] account.updated: failed to update charges_enabled for %s: %v\n", acct.ID, err)
+	}
 }

@@ -63,6 +63,8 @@ type RouterConfig struct {
 	NotificationService *notification.Service
 	WebSocketHub        *websocket.Hub
 	UserService         *user.Service
+	UserRepo            *user.Repository
+	ConnectService      *payment.ConnectService
 	StorageService      *storage.Service
 	ImageRepo           *storage.Repository
 	DB                  HealthChecker
@@ -116,6 +118,9 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 	var paymentHandler *PaymentHandler
 	if cfg.PaymentService != nil {
 		paymentHandler = NewPaymentHandler(cfg.PaymentService, cfg.TransactionService, cfg.WalletService, cfg.Config.Stripe.WebhookSecret)
+		if cfg.UserRepo != nil {
+			paymentHandler.SetUserRepo(cfg.UserRepo)
+		}
 	}
 
 	// Trust handler (optional - only if TrustService is configured)
@@ -238,6 +243,16 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 						r.Get("/balance", walletHandler.GetBalance)
 						r.Get("/deposits", walletHandler.GetDeposits)
 						r.Post("/deposit", walletHandler.CreateDeposit)
+					})
+				}
+
+				// Connect routes (Stripe Connect Express onboarding)
+				if cfg.ConnectService != nil && cfg.UserRepo != nil {
+					connectHandler := NewConnectHandler(cfg.ConnectService, cfg.UserRepo)
+					r.Route("/connect", func(r chi.Router) {
+						r.Post("/onboard", connectHandler.Onboard)
+						r.Get("/status", connectHandler.GetStatus)
+						r.Post("/login-link", connectHandler.CreateLoginLink)
 					})
 				}
 			})

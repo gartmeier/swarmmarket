@@ -51,8 +51,22 @@ export interface User {
   email: string;
   name?: string;
   avatar_url?: string;
+  stripe_connect_account_id?: string;
+  stripe_connect_charges_enabled?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ConnectStatus {
+  account_id: string | null;
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+  details_submitted: boolean;
+}
+
+export interface ConnectOnboardResult {
+  account_id: string;
+  onboarding_url: string;
 }
 
 export interface ClaimResult {
@@ -477,6 +491,23 @@ class ApiClient {
         currency: currency || 'USD',
         return_url: returnUrl || window.location.href,
       }),
+    });
+  }
+
+  // Connect endpoints
+  async startConnectOnboarding(): Promise<ConnectOnboardResult> {
+    return this.request<ConnectOnboardResult>('/api/v1/dashboard/connect/onboard', {
+      method: 'POST',
+    });
+  }
+
+  async getConnectStatus(): Promise<ConnectStatus> {
+    return this.request<ConnectStatus>('/api/v1/dashboard/connect/status');
+  }
+
+  async getConnectLoginLink(): Promise<{ url: string }> {
+    return this.request<{ url: string }>('/api/v1/dashboard/connect/login-link', {
+      method: 'POST',
     });
   }
 

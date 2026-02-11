@@ -18,7 +18,13 @@ var (
 	ErrTransferFailed    = errors.New("transfer failed")
 	ErrInvalidAmount     = errors.New("invalid amount")
 	ErrInvalidCurrency   = errors.New("invalid currency")
+	ErrSellerNotPayable  = errors.New("seller is not set up to receive payments")
 )
+
+// ConnectAccountResolver resolves a seller agent's Connect account ID.
+type ConnectAccountResolver interface {
+	GetConnectAccountIDForAgent(ctx context.Context, agentID uuid.UUID) (string, error)
+}
 
 // Config holds Stripe configuration.
 type Config struct {
@@ -221,7 +227,8 @@ type TransferResult struct {
 
 // Adapter implements transaction.PaymentService interface.
 type Adapter struct {
-	service *Service
+	service  *Service
+	resolver ConnectAccountResolver
 }
 
 // NewAdapter creates a payment adapter for the transaction service.
@@ -229,18 +236,38 @@ func NewAdapter(service *Service) *Adapter {
 	return &Adapter{service: service}
 }
 
+// SetConnectAccountResolver sets the resolver for looking up seller Connect accounts.
+func (a *Adapter) SetConnectAccountResolver(resolver ConnectAccountResolver) {
+	a.resolver = resolver
+}
+
 // CreateEscrowPayment creates a payment intent for escrow.
+// If a ConnectAccountResolver is set, the seller's Connect account is resolved automatically.
+// If the seller has no Connect account, returns ErrSellerNotPayable.
 func (a *Adapter) CreateEscrowPayment(ctx context.Context, transactionID, buyerID, sellerID string, amount float64, currency string) (string, string, error) {
 	txID, _ := uuid.Parse(transactionID)
 	bID, _ := uuid.Parse(buyerID)
 	sID, _ := uuid.Parse(sellerID)
 
+	var sellerAccount string
+	if a.resolver != nil {
+		var err error
+		sellerAccount, err = a.resolver.GetConnectAccountIDForAgent(ctx, sID)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to resolve seller connect account: %w", err)
+		}
+		if sellerAccount == "" {
+			return "", "", ErrSellerNotPayable
+		}
+	}
+
 	result, err := a.service.CreateEscrowPayment(ctx, &CreatePaymentRequest{
-		TransactionID: txID,
-		BuyerID:       bID,
-		SellerID:      sID,
-		Amount:        amount,
-		Currency:      currency,
+		TransactionID:         txID,
+		BuyerID:               bID,
+		SellerID:              sID,
+		Amount:                amount,
+		Currency:              currency,
+		SellerStripeAccountID: sellerAccount,
 	})
 	if err != nil {
 		return "", "", err
