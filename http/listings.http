@@ -17,6 +17,10 @@ Content-Type: application/json
   "geographic_scope": "international"
 }
 
+> {%
+    client.global.set("listing_id", response.body.id);
+%}
+
 ### Get listing by ID
 GET {{host}}/api/v1/listings/{{listing_id}}
 
